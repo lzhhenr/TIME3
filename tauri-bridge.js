@@ -50,6 +50,16 @@
     onStateChanged: callback => subscribe('calendar:state-changed', callback),
   });
 
+  // A reminder is consumed only after its UI has rendered successfully.
+  if (document.getElementById('roller') || new URLSearchParams(location.search).get('mode') === 'toast') {
+    const readyTimer = setInterval(() => {
+      const rendered = document.getElementById('roller')?.dataset.phase ||
+        (new URLSearchParams(location.search).get('mode') === 'toast' && !document.getElementById('toastView')?.hidden && document.getElementById('toastTitle')?.textContent?.trim());
+      if (rendered) { clearInterval(readyTimer); invoke('app:ready').catch(console.error); }
+    }, 100);
+    setTimeout(() => clearInterval(readyTimer), 10000);
+  }
+
   // WebView2 does not implement Electron's CSS -webkit-app-region dragging.
   document.addEventListener('pointerdown', event => {
     if (event.button !== 0 || !event.isPrimary) return;

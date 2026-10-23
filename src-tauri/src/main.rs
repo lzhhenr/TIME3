@@ -1,12 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod native;
 mod store;
-use chrono::Local;
+use chrono::{Local, NaiveDateTime, TimeZone};
 use serde_json::{json, Value};
 use std::{collections::{HashMap, VecDeque}, path::PathBuf, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::{Duration, Instant}};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow, WebviewWindowBuilder, WebviewUrl, PhysicalPosition, PhysicalSize};
 
-struct Popup { payload: Value, opened: Instant, regions: Vec<Value> }
+struct Popup { payload: Value, opened: Instant, regions: Vec<Value>, ready: bool }
 #[derive(Default)]
 struct Runtime { popups: HashMap<String,Popup>, queue: VecDeque<(Value,bool)>, mini: native::MiniController }
 struct Backend { store: Mutex<store::Store>, runtime: Mutex<Runtime>, data: PathBuf }
@@ -42,8 +42,16 @@ fn sync_settings(app:&AppHandle,old:&Value){
  if s["miniMode"]!=true {if let Some(w)=app.get_webview_window("mini"){let _=w.hide();}}
  prune(app);emit_state(app);
 }
+fn current_calendar(state:&Value,queued:&Value,now:chrono::DateTime<Local>)->Option<Value>{
+ let item=state["reminders"].as_array()?.iter().find(|r|r["id"]==queued["id"]&&r["date"]==queued["date"]&&r["time"]==queued["time"]&&r["done"]==false&&r["notifiedAt"].is_null())?;
+ let local=NaiveDateTime::parse_from_str(&format!("{}T{}:00",item["date"].as_str()?,item["time"].as_str()?),"%Y-%m-%dT%H:%M:%S").ok()?;
+ let due=Local.from_local_datetime(&local).earliest()?;
+ if !(0..=86_400_000).contains(&(now.timestamp_millis()-due.timestamp_millis())){return None;}
+ Some(item.clone())
+}
 fn prune(app:&AppHandle){
- let b=backend(app);let s=b.store.lock().unwrap();let r=b.runtime.lock().unwrap();
+ let b=backend(app);let s=b.store.lock().unwrap();let mut r=b.runtime.lock().unwrap();let state=s.get();let now=Local::now();
+ r.queue.retain(|(p,preview)|*preview||if p["kind"]=="wellness"{s.is_pending(p["wellnessType"].as_str().unwrap_or(""),p["id"].as_str().unwrap_or(""))}else{current_calendar(&state,p,now).is_some()});
  let stale:Vec<_>=r.popups.iter().filter(|(_,p)|p.payload["kind"]=="wellness"&&p.payload["preview"]!=true&&!s.is_pending(p.payload["wellnessType"].as_str().unwrap_or(""),p.payload["id"].as_str().unwrap_or(""))).map(|(k,_)|k.clone()).collect();drop(r);drop(s);
  for k in stale{close_popup(app,&k,false);}
 }
@@ -57,16 +65,23 @@ fn present_next(app:&AppHandle)->Result<(),String>{
  let s=settings(app);let roll=s["motion"]=="roll";
  let next={let b=backend(app);let mut r=b.runtime.lock().unwrap();if roll&&!r.popups.is_empty(){return Ok(());}r.queue.pop_front()};
  let Some((mut p,preview))=next else{return Ok(())};
- if !preview&&p["kind"]=="wellness"&&!backend(app).store.lock().unwrap().is_pending(p["wellnessType"].as_str().unwrap_or(""),p["id"].as_str().unwrap_or("")){return Ok(());}
+ if !preview {
+  let b=backend(app);let mut store=b.store.lock().unwrap();
+  if p["kind"]=="wellness"{
+   let kind=p["wellnessType"].as_str().unwrap_or("");let id=p["id"].as_str().unwrap_or("");
+   if !store.is_pending(kind,id){return Ok(());}
+   let Some(current)=store.redisplay(kind,Local::now())? else{return Ok(())};
+   if current["id"]!=p["id"]{return Ok(());}p=current;
+  }else{let Some(current)=current_calendar(&store.get(),&p,Local::now())else{return Ok(())};p=current;}
+ }
  let label=format!("reminder-{}",SERIAL.fetch_add(1,Ordering::Relaxed));let a=native::area(None);let scale=a.scale;
  p["preview"]=json!(preview);p["language"]=s["language"].clone();p["soundEnabled"]=s["soundEnabled"].clone();p["motion"]=s["motion"].clone();p["deliveredAt"]=json!(Local::now().to_rfc3339());
  p["floor"]=json!((a.y as f64+a.height as f64)/scale);p["area"]=json!({"x":a.x as f64/scale,"y":a.y as f64/scale,"width":a.width as f64/scale,"height":a.height as f64/scale});
  let (width,height,x,y)=if roll {(a.width as f64/scale,360.0,a.x,a.y+a.height as i32-(360.0*scale) as i32)}else{let count=backend(app).runtime.lock().unwrap().popups.len().min(3);(420.0,180.0,a.x+a.width as i32-(442.0*scale) as i32,a.y+a.height as i32-((202+164*count)as f64*scale)as i32)};
- backend(app).runtime.lock().unwrap().popups.insert(label.clone(),Popup{payload:p.clone(),opened:Instant::now(),regions:vec![]});
+ backend(app).runtime.lock().unwrap().popups.insert(label.clone(),Popup{payload:p.clone(),opened:Instant::now(),regions:vec![],ready:false});
  let result=base(app,&label,if roll{"roller.html"}else{"index.html?mode=toast"}).inner_size(width,height).resizable(false).skip_taskbar(true).always_on_top(true).focusable(false).build();
  match result {
-  Ok(w)=>{let _=w.set_position(PhysicalPosition::new(x,y));if roll{let _=w.set_ignore_cursor_events(true);}if !preview{backend(app).store.lock().unwrap().mark_delivered(&p,Local::now())?;}let _=app.emit("reminder:fired",p.clone());
-   if s["alwaysOnTop"]==true&&s["miniMode"]==true {if let Some(m)=app.get_webview_window("mini"){if m.is_visible().unwrap_or(false){backend(app).runtime.lock().unwrap().mini.reveal(&m,3200);let _=m.emit("mini:alert",p);}}}emit_state(app);Ok(())},
+  Ok(w)=>{let _=w.set_position(PhysicalPosition::new(x,y));if roll{let _=w.set_ignore_cursor_events(true);}Ok(())},
   Err(e)=>{backend(app).runtime.lock().unwrap().popups.remove(&label);Err(e.to_string())}
  }
 }
@@ -96,7 +111,8 @@ async fn desktop(app:AppHandle,window:WebviewWindow,method:String,args:Vec<Value
  "reminder:open"=>{require(role,&["reminder"])?;show_main(&app,a);close_popup(&app,&label,false);Ok(Value::Null)},
  "reminder:interactive"=>{require(role,&["reminder"])?;window.set_ignore_cursor_events(a!=true).map_err(|e|e.to_string())?;Ok(Value::Null)},
  "reminder:hit-regions"=>{require(role,&["reminder"])?;if let Some(p)=b.runtime.lock().unwrap().popups.get_mut(&label){p.regions=a.as_array().filter(|x|x.len()<20).cloned().unwrap_or_default();}Ok(Value::Null)},
- "app:diagnostic"=>{if std::env::var_os("TIME3_SMOKE_DATA").is_some(){let _=std::fs::write(b.data.join(format!("diagnostic-{}.json",label)),a.to_string());}Ok(Value::Null)},
+ "app:ready"=>{require(role,&["reminder"])?;let payload={let mut r=b.runtime.lock().unwrap();r.popups.get_mut(&label).filter(|p|!p.ready).map(|p|{p.ready=true;p.opened=Instant::now();p.payload.clone()})};if let Some(p)=payload{window.show().map_err(|e|e.to_string())?;if p["preview"]!=true{b.store.lock().unwrap().mark_delivered(&p,Local::now())?;}if let Some(main)=app.get_webview_window("main"){let _=main.emit("reminder:fired",p.clone());}let s=settings(&app);if s["alwaysOnTop"]==true&&s["miniMode"]==true{if let Some(m)=app.get_webview_window("mini"){if m.is_visible().unwrap_or(false){b.runtime.lock().unwrap().mini.reveal(&m,3200);let _=m.emit("mini:alert",p);}}}emit_state(&app);}Ok(json!(true))},
+ "app:diagnostic"=>{if std::env::var_os("TIME3_SMOKE_DATA").is_none(){return Err("Diagnostics disabled".into());}let _=std::fs::write(b.data.join(format!("diagnostic-{}.json",label)),a.to_string());let count=b.runtime.lock().unwrap().popups.get(&label).map(|p|p.regions.len()).unwrap_or(0);let pos=window.outer_position().map_err(|e|e.to_string())?;let size=window.outer_size().map_err(|e|e.to_string())?;Ok(json!({"regionCount":count,"visible":window.is_visible().unwrap_or(false),"alwaysOnTop":window.is_always_on_top().unwrap_or(false),"bounds":{"x":pos.x,"y":pos.y,"width":size.width,"height":size.height},"workArea":native::area(Some(&window)),"scaleFactor":window.scale_factor().unwrap_or(1.0)}))},
  _=>Err(format!("Unknown desktop command: {method}"))
  }
 }
@@ -105,7 +121,7 @@ fn poll(app:AppHandle){
  loop{std::thread::sleep(Duration::from_millis(32));let b=backend(&app);
   if let Some(w)=app.get_webview_window("mini"){b.runtime.lock().unwrap().mini.tick(&w);}
   let mut expired=vec![];{let r=b.runtime.lock().unwrap();for (label,p) in &r.popups{
-   if p.opened.elapsed().as_secs()>=if p.payload["motion"]=="roll"{45}else{18}{expired.push(label.clone());continue;}
+   if p.opened.elapsed().as_secs()>=if !p.ready{12}else if p.payload["motion"]=="roll"{45}else{18}{expired.push(label.clone());continue;}
    if p.payload["motion"]=="roll"{if let Some(w)=app.get_webview_window(label){let cursor=native::cursor();let pos=w.outer_position().unwrap_or_default();let scale=w.scale_factor().unwrap_or(1.0);let x=(cursor.0-pos.x)as f64/scale;let y=(cursor.1-pos.y)as f64/scale;
     let hit=p.regions.iter().any(|v|{let rx=v["x"].as_f64().unwrap_or(-9999.);let ry=v["y"].as_f64().unwrap_or(-9999.);x>=rx&&y>=ry&&x<=rx+v["width"].as_f64().unwrap_or(0.)&&y<=ry+v["height"].as_f64().unwrap_or(0.)});let _=w.set_ignore_cursor_events(!hit);
    }}
@@ -115,14 +131,27 @@ fn poll(app:AppHandle){
   if raise_at.elapsed()>=Duration::from_millis(700){raise_at=Instant::now();let pin=settings(&app)["alwaysOnTop"]==true;for (label,w) in app.webview_windows(){if w.is_visible().unwrap_or(false)&&(label!="main"||pin){native::raise(&w);}}}
  }
 }
+fn tray_action(app:AppHandle,id:String){
+ match id.as_str(){
+  "open"=>show_main(&app,Value::Null),
+  "mini"=>{
+   let old=settings(&app);let mut state=backend(&app).store.lock().unwrap().get();
+   if state.is_null(){state=json!({"reminders":[],"settings":old});}
+   state["settings"]["miniMode"]=json!(true);
+   let saved=backend(&app).store.lock().unwrap().save(state,Local::now());
+   match saved{Ok(_)=>{sync_settings(&app,&old);hide_main(&app);},Err(e)=>eprintln!("Unable to save mini mode: {e}")}
+  },
+  "quit"=>app.exit(0),_=>{}
+ }
+}
 fn main(){
- tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app,_,_|show_main(app,Value::Null))).invoke_handler(tauri::generate_handler![desktop]).setup(|app|{
+ tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app,_,_|{let app=app.clone();std::thread::spawn(move||show_main(&app,Value::Null));})).invoke_handler(tauri::generate_handler![desktop]).setup(|app|{
   let root=PathBuf::from(std::env::var_os("APPDATA").ok_or("APPDATA unavailable")?);let smoke=std::env::var_os("TIME3_SMOKE_DATA");let data=smoke.clone().map(PathBuf::from).unwrap_or(root.join("TIME3-Tauri"));std::fs::create_dir_all(&data)?;
   if smoke.is_none()&&!data.join("migration-complete").exists(){for name in ["calendar-state.json","wellness-state.json"]{let old=root.join("TIME3").join(name);let new=data.join(name);if old.exists()&&!new.exists(){std::fs::copy(&old,&new)?;}}std::fs::write(data.join("migration-complete"),"Copied from TIME3; original data unchanged.")?;}
   let store=store::Store::load(data.clone()).map_err(std::io::Error::other)?;app.manage(Backend{store:Mutex::new(store),runtime:Mutex::new(Runtime::default()),data});let h=app.handle();let a=native::area(None);
   let w=base(h,"main","index.html").inner_size((a.width as f64/a.scale-24.0).min(1180.0),(a.height as f64/a.scale-24.0).min(820.0)).min_inner_size(720.0,600.0).always_on_top(settings(h)["alwaysOnTop"]==true).build()?;place(&w,settings(h)["windowPosition"].as_str().unwrap_or("center"));
   let open=tauri::menu::MenuItem::with_id(app,"open","打开 TIME³",true,None::<&str>)?;let mini=tauri::menu::MenuItem::with_id(app,"mini","悬浮方块",true,None::<&str>)?;let quit=tauri::menu::MenuItem::with_id(app,"quit","退出（停止提醒）",true,None::<&str>)?;let menu=tauri::menu::Menu::with_items(app,&[&open,&mini,&quit])?;
-  tauri::tray::TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).tooltip("TIME³ · WebView2 试用版").menu(&menu).show_menu_on_left_click(false).on_menu_event(|app,e|match e.id.as_ref(){"open"=>show_main(app,Value::Null),"mini"=>{if let Some(w)=app.get_webview_window("main"){let _=w.hide();}let _=show_mini(app);},"quit"=>app.exit(0),_=>{}}).on_tray_icon_event(|tray,event|{if matches!(event,tauri::tray::TrayIconEvent::Click{button:tauri::tray::MouseButton::Left,button_state:tauri::tray::MouseButtonState::Up,..}){show_main(tray.app_handle(),Value::Null);}}).build(app)?;
+  tauri::tray::TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).tooltip("TIME³ · WebView2 试用版").menu(&menu).show_menu_on_left_click(false).on_menu_event(|app,e|{let app=app.clone();let id=e.id.as_ref().to_string();std::thread::spawn(move||tray_action(app,id));}).on_tray_icon_event(|tray,event|{if matches!(event,tauri::tray::TrayIconEvent::Click{button:tauri::tray::MouseButton::Left,button_state:tauri::tray::MouseButtonState::Up,..}){let app=tray.app_handle().clone();std::thread::spawn(move||show_main(&app,Value::Null));}}).build(app)?;
   let handle=app.handle().clone();std::thread::spawn(move||poll(handle));Ok(())
- }).on_window_event(|w,event|{if w.label()=="main"{if let tauri::WindowEvent::CloseRequested{api,..}=event{api.prevent_close();hide_main(w.app_handle());}}}).build(tauri::generate_context!()).expect("Unable to start TIME3").run(|_,event|{if let tauri::RunEvent::ExitRequested{code:None,api,..}=event{api.prevent_exit();}});
+ }).on_window_event(|w,event|{if w.label()=="main"{if let tauri::WindowEvent::CloseRequested{api,..}=event{api.prevent_close();let app=w.app_handle().clone();std::thread::spawn(move||hide_main(&app));}}}).build(tauri::generate_context!()).expect("Unable to start TIME3").run(|_,event|{if let tauri::RunEvent::ExitRequested{code:None,api,..}=event{api.prevent_exit();}});
 }
