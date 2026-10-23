@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TIME3 Tauri",
+  "version": "1.6.0-beta.1",
+  "identifier": "studio.next.time3.tauri",
+  "build": { "beforeBuildCommand": "node scripts/build-tauri.mjs", "beforeDevCommand": "node scripts/build-tauri.mjs", "frontendDist": "../tauri-dist" },
+  "app": { "withGlobalTauri": true, "windows": [], "security": { "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://api.open-meteo.com https://geocoding-api.open-meteo.com https://api.bigdatacloud.net; object-src 'none'; frame-src 'none'" } },
+  "bundle": { "active": false, "icon": ["../assets/icon-32.png", "../assets/icon-128.png", "../assets/icon-256.png", "../assets/TIME3.ico"] }
+}

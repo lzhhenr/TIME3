@@ -7,4 +7,6 @@ github-upload/
 *.log
 .env
 .env.*
+tauri-dist/
+src-tauri/target/
 

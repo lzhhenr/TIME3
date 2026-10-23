@@ -10,7 +10,10 @@
     "start": "electron .",
     "preview": "node server.mjs",
     "test": "node --test tests/*.test.mjs",
-    "package": "node scripts/package.mjs"
+    "package": "node scripts/package.mjs",
+    "tauri:build": "node scripts/build-tauri.mjs && cargo build --release --manifest-path src-tauri/Cargo.toml",
+    "tauri:dev": "node scripts/build-tauri.mjs && cargo run --manifest-path src-tauri/Cargo.toml",
+    "tauri:test": "cargo test --manifest-path src-tauri/Cargo.toml"
   },
   "devDependencies": {
     "electron": "45.0.0",

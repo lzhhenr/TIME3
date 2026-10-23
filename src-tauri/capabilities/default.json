@@ -1,0 +1,6 @@
+{
+  "identifier": "desktop-local",
+  "description": "Only local TIME3 windows can listen to app events.",
+  "windows": ["main", "mini", "reminder-*"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}
