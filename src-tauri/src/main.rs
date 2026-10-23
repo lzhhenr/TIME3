@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use std::{collections::{HashMap, VecDeque}, path::PathBuf, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::{Duration, Instant}};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow, WebviewWindowBuilder, WebviewUrl, PhysicalPosition, PhysicalSize};
 
-struct Popup { payload: Value, opened: Instant, regions: Vec<Value>, ready: bool }
+struct Popup { payload: Value, opened: Instant, regions: Vec<Value>, ready: bool, viewport_width: f64 }
 #[derive(Default)]
 struct Runtime { popups: HashMap<String,Popup>, queue: VecDeque<(Value,bool)>, mini: native::MiniController }
 struct Backend { store: Mutex<store::Store>, runtime: Mutex<Runtime>, data: PathBuf }
@@ -76,9 +76,9 @@ fn present_next(app:&AppHandle)->Result<(),String>{
  }
  let label=format!("reminder-{}",SERIAL.fetch_add(1,Ordering::Relaxed));let a=native::area(None);let scale=a.scale;
  p["preview"]=json!(preview);p["language"]=s["language"].clone();p["soundEnabled"]=s["soundEnabled"].clone();p["motion"]=s["motion"].clone();p["deliveredAt"]=json!(Local::now().to_rfc3339());
- p["floor"]=json!((a.y as f64+a.height as f64)/scale);p["area"]=json!({"x":a.x as f64/scale,"y":a.y as f64/scale,"width":a.width as f64/scale,"height":a.height as f64/scale});
+ p["localViewport"]=json!(true);p["floor"]=json!((a.y as f64+a.height as f64)/scale);p["area"]=json!({"x":a.x as f64/scale,"y":a.y as f64/scale,"width":a.width as f64/scale,"height":a.height as f64/scale});
  let (width,height,x,y)=if roll {(a.width as f64/scale,360.0,a.x,a.y+a.height as i32-(360.0*scale) as i32)}else{let count=backend(app).runtime.lock().unwrap().popups.len().min(3);(420.0,180.0,a.x+a.width as i32-(442.0*scale) as i32,a.y+a.height as i32-((202+164*count)as f64*scale)as i32)};
- backend(app).runtime.lock().unwrap().popups.insert(label.clone(),Popup{payload:p.clone(),opened:Instant::now(),regions:vec![],ready:false});
+ backend(app).runtime.lock().unwrap().popups.insert(label.clone(),Popup{payload:p.clone(),opened:Instant::now(),regions:vec![],ready:false,viewport_width:0.0});
  let result=base(app,&label,if roll{"roller.html"}else{"index.html?mode=toast"}).inner_size(width,height).resizable(false).skip_taskbar(true).always_on_top(true).focusable(false).build();
  match result {
   Ok(w)=>{let _=w.set_position(PhysicalPosition::new(x,y));if roll{let _=w.set_ignore_cursor_events(true);}Ok(())},
@@ -110,7 +110,7 @@ async fn desktop(app:AppHandle,window:WebviewWindow,method:String,args:Vec<Value
  "reminder:dismiss"|"reminder:acknowledge"=>{require(role,&["reminder"])?;close_popup(&app,&label,true);Ok(Value::Null)},
  "reminder:open"=>{require(role,&["reminder"])?;show_main(&app,a);close_popup(&app,&label,false);Ok(Value::Null)},
  "reminder:interactive"=>{require(role,&["reminder"])?;window.set_ignore_cursor_events(a!=true).map_err(|e|e.to_string())?;Ok(Value::Null)},
- "reminder:hit-regions"=>{require(role,&["reminder"])?;if let Some(p)=b.runtime.lock().unwrap().popups.get_mut(&label){p.regions=a.as_array().filter(|x|x.len()<20).cloned().unwrap_or_default();}Ok(Value::Null)},
+ "reminder:hit-regions"=>{require(role,&["reminder"])?;if let Some(p)=b.runtime.lock().unwrap().popups.get_mut(&label){p.regions=a.as_array().filter(|x|x.len()<20).cloned().unwrap_or_default();p.viewport_width=args.get(1).and_then(|v|v["width"].as_f64()).filter(|v|v.is_finite()&&*v>0.0).unwrap_or(0.0);}Ok(Value::Null)},
  "app:ready"=>{require(role,&["reminder"])?;let payload={let mut r=b.runtime.lock().unwrap();r.popups.get_mut(&label).filter(|p|!p.ready).map(|p|{p.ready=true;p.opened=Instant::now();p.payload.clone()})};if let Some(p)=payload{window.show().map_err(|e|e.to_string())?;if p["preview"]!=true{b.store.lock().unwrap().mark_delivered(&p,Local::now())?;}if let Some(main)=app.get_webview_window("main"){let _=main.emit("reminder:fired",p.clone());}let s=settings(&app);if s["alwaysOnTop"]==true&&s["miniMode"]==true{if let Some(m)=app.get_webview_window("mini"){if m.is_visible().unwrap_or(false){b.runtime.lock().unwrap().mini.reveal(&m,3200);let _=m.emit("mini:alert",p);}}}emit_state(&app);}Ok(json!(true))},
  "app:diagnostic"=>{if std::env::var_os("TIME3_SMOKE_DATA").is_none(){return Err("Diagnostics disabled".into());}let _=std::fs::write(b.data.join(format!("diagnostic-{}.json",label)),a.to_string());let count=b.runtime.lock().unwrap().popups.get(&label).map(|p|p.regions.len()).unwrap_or(0);let pos=window.outer_position().map_err(|e|e.to_string())?;let size=window.outer_size().map_err(|e|e.to_string())?;Ok(json!({"regionCount":count,"visible":window.is_visible().unwrap_or(false),"alwaysOnTop":window.is_always_on_top().unwrap_or(false),"bounds":{"x":pos.x,"y":pos.y,"width":size.width,"height":size.height},"workArea":native::area(Some(&window)),"scaleFactor":window.scale_factor().unwrap_or(1.0)}))},
  _=>Err(format!("Unknown desktop command: {method}"))
@@ -122,13 +122,13 @@ fn poll(app:AppHandle){
   if let Some(w)=app.get_webview_window("mini"){b.runtime.lock().unwrap().mini.tick(&w);}
   let mut expired=vec![];{let r=b.runtime.lock().unwrap();for (label,p) in &r.popups{
    if p.opened.elapsed().as_secs()>=if !p.ready{12}else if p.payload["motion"]=="roll"{45}else{18}{expired.push(label.clone());continue;}
-   if p.payload["motion"]=="roll"{if let Some(w)=app.get_webview_window(label){let cursor=native::cursor();let pos=w.outer_position().unwrap_or_default();let scale=w.scale_factor().unwrap_or(1.0);let x=(cursor.0-pos.x)as f64/scale;let y=(cursor.1-pos.y)as f64/scale;
+   if p.payload["motion"]=="roll"{if let Some(w)=app.get_webview_window(label){let cursor=native::cursor();let pos=w.outer_position().unwrap_or_default();let scale=if p.viewport_width>0.0{w.inner_size().unwrap_or_default().width as f64/p.viewport_width}else{w.scale_factor().unwrap_or(1.0)};let x=(cursor.0-pos.x)as f64/scale;let y=(cursor.1-pos.y)as f64/scale;
     let hit=p.regions.iter().any(|v|{let rx=v["x"].as_f64().unwrap_or(-9999.);let ry=v["y"].as_f64().unwrap_or(-9999.);x>=rx&&y>=ry&&x<=rx+v["width"].as_f64().unwrap_or(0.)&&y<=ry+v["height"].as_f64().unwrap_or(0.)});let _=w.set_ignore_cursor_events(!hit);
    }}
   }}for l in expired{close_popup(&app,&l,false);}
   if second.elapsed()>=Duration::from_secs(1){second=Instant::now();let due=b.store.lock().unwrap().tick(Local::now());match due{Ok(due)=>for p in due{enqueue(&app,p,false)},Err(e)=>eprintln!("Timer: {e}")}let _=app.emit("system:clock",clock());let status=b.store.lock().unwrap().wellness_status(Local::now());let _=app.emit("wellness:state",status);prune(&app);}
   if let Err(e)=present_next(&app){eprintln!("Reminder: {e}");}
-  if raise_at.elapsed()>=Duration::from_millis(700){raise_at=Instant::now();let pin=settings(&app)["alwaysOnTop"]==true;for (label,w) in app.webview_windows(){if w.is_visible().unwrap_or(false)&&(label!="main"||pin){native::raise(&w);}}}
+  if raise_at.elapsed()>=Duration::from_millis(700){raise_at=Instant::now();let pin=settings(&app)["alwaysOnTop"]==true;let mut windows:Vec<_>=app.webview_windows().into_iter().collect();windows.sort_by_key(|(label,_)|if label=="main"{0}else if label=="mini"{1}else{2});for (label,w) in windows{if w.is_visible().unwrap_or(false)&&(label!="main"||pin){native::raise(&w);}}}
  }
 }
 fn tray_action(app:AppHandle,id:String){

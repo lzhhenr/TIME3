@@ -27,10 +27,10 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const SIZE = 76, HEIGHT = 360, HALF = 90;
 // Windows may add non-client pixels to a frameless window at fractional DPI.
 // Place the model in actual content coordinates against the monitor work area.
-const contentFloor = payload.floor - window.screenY;
+const contentFloor = payload.localViewport ? innerHeight : payload.floor - window.screenY;
 shell.style.top = `${contentFloor - HEIGHT}px`;
-const endX = payload.area.x + payload.area.width / 2 - window.screenX;
-const startX = payload.area.x + payload.area.width - window.screenX + HALF;
+const endX = payload.localViewport ? innerWidth / 2 : payload.area.x + payload.area.width / 2 - window.screenX;
+const startX = payload.localViewport ? innerWidth + HALF : payload.area.x + payload.area.width - window.screenX + HALF;
 const distance = startX - endX;
 const turns = Math.max(1, Math.round(distance / (4 * SIZE)));
 const duration = 2200;
@@ -129,7 +129,7 @@ function animate(now) {
   hit.style.width = `${right-left}px`; hit.style.height = `${height}px`;
   // Readable diagnostics used by native smoke tests, no IPC data or coordinates persisted.
   shell.dataset.phase = progress < 1 ? 'rolling' : 'bouncing';
-  shell.dataset.centerX = String(x); shell.dataset.floor = String(payload.floor);
+  shell.dataset.centerX = String(x); shell.dataset.floor = String(payload.localViewport ? window.screenY + innerHeight : payload.floor);
   shell.dataset.contactY = String(window.screenY + shell.getBoundingClientRect().bottom-jump); shell.dataset.jump = String(jump);
   shell.dataset.angle = String(angle);
   shell.dataset.soundsPlayed=String(sound.getState().played);

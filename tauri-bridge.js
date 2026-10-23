@@ -91,7 +91,7 @@
       const serialized = JSON.stringify(regions);
       if (serialized === previous) return;
       pending = true;
-      try { await invoke('reminder:hit-regions', regions); previous = serialized; }
+      try { await invoke('reminder:hit-regions', regions, {width: innerWidth, height: innerHeight}); previous = serialized; }
       catch (error) { console.error('Unable to update reminder input regions', error); }
       finally { pending = false; }
     };
