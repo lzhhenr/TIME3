@@ -7,7 +7,7 @@
   const invoke = (method, ...args) => tauri.core.invoke('desktop', { method, args });
   let calibrated;
   const calibrate = () => {
-    if (!document.getElementById('roller') && !['mini','toast'].includes(new URLSearchParams(location.search).get('mode'))) return Promise.resolve();
+    if (!document.getElementById('roller') && new URLSearchParams(location.search).get('mode') !== 'toast') return Promise.resolve();
     return calibrated ||= invoke('window:viewport', devicePixelRatio).then(async expected => {
       for (let i=0;i<30 && Math.abs(innerHeight-expected.height)>1;i++) await new Promise(resolve=>setTimeout(resolve,20));
     });
