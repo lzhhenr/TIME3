@@ -19,6 +19,7 @@ assert.deepEqual(JSON.parse(await fs.readFile(path.join(output,'data/diagnostic-
 try{
  await test('Native bridge and rendered calendar',async()=>{await main.waitForFunction(()=>document.querySelectorAll('#dateGrid button').length>=28);assert.equal(await main.evaluate(()=>desktop.runtime),'tauri');await main.screenshot({path:path.join(output,'main.png')});return await main.locator('#dateGrid button').count();});
  await test('Clock matches OS',async()=>{const c=await rpc(main,'system:get-clock');assert(Math.abs(Date.now()-c.epoch)<2000);return c;});
+ if ((await rpc(main,'wellness:get-status')).codex.enabled) await test('Closing a real health reminder restarts five-hour timer',async()=>{const popup=await newPage(u=>u.includes('roller.html'));await popup.waitForFunction(()=>document.getElementById('roller').dataset.phase==='bouncing');const p=await rpc(popup,'reminder:get-toast');assert.equal(p.wellnessType,'codex');assert(!p.preview);await dismiss(popup,'reminder:dismiss');const s=(await rpc(main,'wellness:get-status')).codex;assert.equal(s.phase,'counting');assert(s.remainingMs>299*60000&&s.remainingMs<=300*60000);return s;});
  let raw=await rpc(main,'calendar:get-state');if(!raw)raw={reminders:[],settings:{}};
  raw.settings={...raw.settings,soundEnabled:false,sedentaryEnabled:false,eyeEnabled:false,codexEnabled:false,alwaysOnTop:false,miniMode:false};
  raw.reminders=[{id:'smoke-future',date:'2099-01-01',time:'09:00',title:'Local persistence check',done:false}];

@@ -5,6 +5,13 @@
   if (window.desktop || !tauri?.core?.invoke || !tauri?.event?.listen) return;
 
   const invoke = (method, ...args) => tauri.core.invoke('desktop', { method, args });
+  let calibrated;
+  const calibrate = () => {
+    if (!document.getElementById('roller') && !['mini','toast'].includes(new URLSearchParams(location.search).get('mode'))) return Promise.resolve();
+    return calibrated ||= invoke('window:viewport', devicePixelRatio).then(async expected => {
+      for (let i=0;i<30 && Math.abs(innerHeight-expected.height)>1;i++) await new Promise(resolve=>setTimeout(resolve,20));
+    });
+  };
   const subscribe = (channel, callback) => {
     if (typeof callback !== 'function') throw new TypeError('Callback required');
     let disposed = false, unlisten;
@@ -21,7 +28,7 @@
     runtime: 'tauri',
     getSystemClock: () => invoke('system:get-clock'),
     onSystemClock: callback => subscribe('system:clock', callback),
-    getState: () => invoke('calendar:get-state'),
+    getState: async () => { await calibrate(); return invoke('calendar:get-state'); },
     getLocation: () => invoke('location:get'),
     saveState: state => invoke('calendar:save-state', state),
     hide: () => invoke('window:hide'),
@@ -40,7 +47,7 @@
     onWellnessState: callback => subscribe('wellness:state', callback),
     testNotification: reminder => invoke('reminder:test', reminder),
     getVersion: () => invoke('app:version'),
-    getToast: () => invoke('reminder:get-toast'),
+    getToast: async () => { await calibrate(); return invoke('reminder:get-toast'); },
     dismissToast: () => invoke('reminder:dismiss'),
     acknowledgeReminder: () => invoke('reminder:acknowledge'),
     setReminderInteractive: enabled => invoke('reminder:interactive', enabled),
