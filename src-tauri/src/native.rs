@@ -94,6 +94,26 @@ pub fn raise(window: &WebviewWindow) {
 #[cfg(not(windows))]
 pub fn raise(window: &WebviewWindow) { let _ = window.set_always_on_top(true); }
 
+/// Show an auxiliary window without activating it. Tauri's regular show() can
+/// activate a Windows WebView even when the builder used focusable(false).
+#[cfg(windows)]
+pub fn show_inactive(window: &WebviewWindow) {
+    use windows_sys::Win32::{Foundation::HWND, UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE,
+        WS_EX_NOACTIVATE, SW_SHOWNOACTIVATE,
+    }};
+    if let Ok(handle) = window.hwnd() {
+        let hwnd = handle.0 as HWND;
+        unsafe {
+            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE as isize);
+            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        }
+    }
+}
+#[cfg(not(windows))]
+pub fn show_inactive(window: &WebviewWindow) { let _ = window.show(); }
+
 /// Called only after the user enables system location. No network/IP lookup.
 /// Keep the existing Windows permission prompt and a bounded helper lifetime.
 #[cfg(windows)]
