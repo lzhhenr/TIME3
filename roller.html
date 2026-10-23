@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'">
+  <title>TIME³ reminder</title><link rel="stylesheet" href="roller.css">
+</head>
+<body>
+  <div id="roller" class="roller">
+    <div id="cubeVisual" aria-hidden="true"></div>
+    <button id="cubeHit" class="cube-hit" aria-label="打开提醒"></button>
+    <button id="dismiss" class="dismiss" aria-label="关闭提醒" title="关闭提醒">×</button>
+    <div id="hint" class="hint" role="status"><span id="time"></span><strong id="title"></strong><small id="help"></small><button id="acknowledge" hidden>收到</button></div>
+  </div>
+  <script type="module" src="roller.bundle.js"></script>
+</body>
+</html>

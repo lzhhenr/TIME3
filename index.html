@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://geocoding-api.open-meteo.com https://api.open-meteo.com; font-src 'self'; object-src 'none'; base-uri 'none'">
+  <title>TIME³ · 让时间，轻一点</title><link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><i></i><i></i><i></i></div>
+  <main class="app" id="mainApp">
+    <section class="calendar-board" aria-label="月历">
+      <header class="calendar-header">
+        <div class="brand"><h1>TIME<sup>3</sup></h1><p>让时间，轻一点。</p></div>
+        <nav class="month-nav" aria-label="切换月份"><button class="icon-button" id="prevMonth" aria-label="上个月" data-icon="chevron-left"></button><h2 id="monthTitle"></h2><button class="icon-button" id="nextMonth" aria-label="下个月" data-icon="chevron-right"></button></nav>
+        <button class="soft-button today-button" id="todayButton">今天</button>
+        <button class="icon-button" id="settingsButton" data-icon="sliders" aria-label="组件设置" aria-expanded="false"></button>
+      </header>
+      <div class="weekdays" aria-hidden="true"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div>
+      <div class="calendar-stage" id="calendarStage"><div id="scene" aria-hidden="true"></div><div class="date-grid" id="dateGrid" role="group" aria-label="选择日期"></div></div>
+      <footer class="calendar-footer"><span class="gesture"><span data-icon="hand"></span> 轻点日期，展开这一天</span><span id="monthCount">好好生活，慢慢安排</span></footer>
+    </section>
+    <aside class="day-sheet" id="daySheet" aria-label="当天详情">
+      <div class="day-topline"><span id="dayContext">今天</span><button class="icon-button" id="collapseDetail" data-icon="minus" aria-label="收起当天详情"></button></div>
+      <div class="date-heading"><div><h2 id="dayTitle"></h2><p id="daySubtitle"></p></div><div class="date-token" id="dateToken" aria-hidden="true"></div></div>
+      <div class="weather" id="weather"><div class="weather-symbol" aria-hidden="true"><span class="sun"></span><span class="cloud"></span></div><div><strong id="weatherTemp">—</strong><span id="weatherLabel">厦门 · 获取天气中</span></div><span id="weatherRange"></span></div>
+      <div class="occasion" id="occasion" hidden><span data-icon="gift"></span><span id="occasionText"></span></div>
+      <div class="agenda-heading"><h3>这一天的安排</h3><span id="agendaCount"></span></div>
+      <div class="reminder-list" id="reminderList"></div>
+      <form id="reminderForm" class="reminder-form"><label class="sr-only" for="reminderTitle">提醒内容</label><div class="input-row"><span data-icon="plus"></span><input id="reminderTitle" placeholder="留一件想做的事…" maxlength="160" autocomplete="off" required></div><div class="form-options"><label class="time-field"><span data-icon="bell"></span><input type="time" id="reminderTime" value="09:00" aria-label="提醒时间" required></label><button type="button" id="cancelEdit" hidden>取消</button><button type="submit" class="add-button" id="saveReminder">添加提醒 <span data-icon="arrow-up-right"></span></button></div><p class="form-error" id="formError" role="alert" hidden></p></form>
+      <p class="local-note"><span data-icon="lock"></span><span id="storageNote">安排只保存在这台电脑</span></p>
+    </aside>
+    <button class="reopen-detail soft-button" id="reopenDetail" hidden>展开这一天 <span data-icon="chevron-right"></span></button>
+    <div class="widget-controls"><button class="soft-button" id="pinButton" aria-pressed="false"><span data-icon="pin"></span>置顶</button><button class="soft-button" id="miniButton"><span class="tiny-cube"></span>收成小方块</button><button class="icon-button" id="hideButton" aria-label="收起到托盘" data-icon="minus"></button></div>
+    <section class="settings-sheet" id="settingsSheet" aria-label="组件设置" hidden>
+      <header><h2 data-i18n="settingsTitle">按你的节奏</h2><button class="icon-button" id="closeSettings" aria-label="关闭设置" data-icon="x"></button></header>
+      <nav class="settings-nav" aria-label="设置分类"><button data-section="appearanceSettings" data-i18n="appearanceSection">外观</button><button data-section="reminderSettings" data-i18n="remindersSection">提醒</button><button data-section="generalSettings" data-i18n="generalSection">通用</button></nav>
+      <div class="settings-scroll">
+        <section id="appearanceSettings" class="settings-group">
+          <h3 data-i18n="appearanceSection">外观</h3>
+          <label class="setting-label" for="blockShape" data-i18n="blockShape">方块造型</label><select id="blockShape"><option value="classic" data-i18n="shapeClassic">经典圆润</option><option value="slab" data-i18n="shapeSlab">圆角厚板</option></select>
+          <div class="setting-label" data-i18n="paletteLabel">方块配色</div>
+          <div class="palette-options" role="group" aria-label="配色预设">
+            <button class="palette-option" data-palette="butter" aria-pressed="true"><span class="palette-dots"><i></i><i></i><i></i><i></i></span><span data-i18n="paletteButter">奶油黄</span></button>
+            <button class="palette-option" data-palette="rose" aria-pressed="false"><span class="palette-dots"><i></i><i></i><i></i><i></i></span><span data-i18n="paletteRose">玫瑰粉</span></button>
+            <button class="palette-option" data-palette="lavender" aria-pressed="false"><span class="palette-dots"><i></i><i></i><i></i><i></i></span><span data-i18n="paletteLavender">鸢尾紫</span></button>
+            <button class="palette-option" data-palette="monochrome" aria-pressed="false"><span class="palette-dots"><i></i><i></i><i></i><i></i></span><span data-i18n="paletteMonochrome">黑白灰</span></button>
+            <button class="palette-option" data-palette="green" aria-pressed="false"><span class="palette-dots"><i></i><i></i><i></i><i></i></span><span data-i18n="paletteGreen">翡翠绿</span></button>
+            <button class="palette-option" data-palette="klein" aria-pressed="false"><span class="palette-dots"><i></i><i></i><i></i><i></i></span><span data-i18n="paletteKlein">克莱因蓝</span></button>
+          </div>
+          <div class="toggle-row"><label for="bgEnabled" data-i18n="showBackground">显示面板背景</label><input id="bgEnabled" type="checkbox" role="switch" checked></div>
+          <div class="background-options"><label class="color-field" for="bgColor"><span data-i18n="backgroundColor">背景颜色</span><input id="bgColor" type="color" value="#f0e9e2"></label><label class="opacity-field" for="bgOpacity"><span data-i18n="backgroundOpacity">不透明度</span><output id="opacityValue">92%</output></label><input id="bgOpacity" type="range" min="0" max="100" value="92" step="1"></div>
+          <div id="textModeRow"><label class="setting-label" for="textMode" data-i18n="wallpaperTone">无背景时的文字</label><select id="textMode"><option value="light" data-i18n="lightText">浅色文字 · 适合深色壁纸</option><option value="dark" data-i18n="darkText" selected>深色文字 · 适合浅色壁纸</option></select></div>
+          <label class="setting-label" for="windowPosition" data-i18n="windowPosition">桌面显示位置</label><select id="windowPosition"><option value="center" data-i18n="positionCenter">居中</option><option value="top-left" data-i18n="positionTopLeft">左上</option><option value="bottom-left" data-i18n="positionBottomLeft">左下</option><option value="top-right" data-i18n="positionTopRight">右上</option><option value="bottom-right" data-i18n="positionBottomRight">右下</option></select>
+        </section>
+        <section id="reminderSettings" class="settings-group">
+          <h3 data-i18n="remindersSection">提醒</h3>
+          <div class="toggle-row"><label for="sedentaryEnabled" data-i18n="sedentaryReminder">久坐提醒</label><input id="sedentaryEnabled" type="checkbox" role="switch"></div>
+          <div class="interval-row"><label for="sedentaryMinutes" data-i18n="reminderInterval">提醒间隔</label><select id="sedentaryMinutes"><option value="30" data-i18n="minutes30">30 分钟</option><option value="60" data-i18n="minutes60">60 分钟</option></select><button class="quiet-button" data-wellness-preview="sedentary" data-i18n="preview">试播</button></div>
+          <div class="wellness-status" id="sedentaryStatus"></div>
+          <div class="toggle-row"><label for="eyeEnabled" data-i18n="eyeReminder">远眺提醒</label><input id="eyeEnabled" type="checkbox" role="switch"></div>
+          <div class="interval-row"><label for="eyeMinutes" data-i18n="reminderInterval">提醒间隔</label><select id="eyeMinutes"><option value="20" data-i18n="minutes20">20 分钟</option><option value="30" data-i18n="minutes30">30 分钟</option></select><button class="quiet-button" data-wellness-preview="eye" data-i18n="preview">试播</button></div>
+          <div class="wellness-status" id="eyeStatus"></div>
+          <div class="toggle-row"><label for="codexEnabled" data-i18n="codexReminder">codex复活</label><input id="codexEnabled" type="checkbox" role="switch"></div><div class="interval-row"><label for="codexMinutes" data-i18n="reminderInterval">提醒间隔</label><select id="codexMinutes"><option value="300" data-i18n="hours5">5 小时</option></select><button class="quiet-button" data-wellness-preview="codex" data-i18n="preview">试播</button></div><div class="wellness-status" id="codexStatus"></div>
+          <p class="setting-hint" data-i18n="wellnessHint">点击提醒中的「收到」后，重新开始计时。</p>
+          <div class="settings-rule"></div>
+          <div class="setting-label" data-i18n="motionLabel">弹出方式</div><div class="segmented"><button id="motionSmooth" data-motion="smooth" data-i18n="motionSmooth">轻柔展开</button><button id="motionRoll" data-motion="roll" data-i18n="motionRoll">方块翻滚</button></div><p class="setting-hint" id="rollDescription">独立方块沿任务栏滚入，在屏幕中间弹跳。</p>
+          <div class="toggle-row"><label for="soundEnabled" data-i18n="soundEnabled">软件音效</label><input id="soundEnabled" type="checkbox" role="switch" checked></div><p class="setting-hint" data-i18n="soundHint">轻点、翻滚、回弹与确认，配上轻巧的声音。</p>
+          <button class="soft-button test-reminder" id="testReminder"><span data-icon="bell"></span>试一下提醒效果</button><p class="setting-hint" id="backgroundNote">组件保持运行时，会在设定时间提醒你。电脑休眠期间不会唤醒。</p>
+        </section>
+        <section id="generalSettings" class="settings-group">
+          <h3 data-i18n="generalSection">通用</h3>
+          <label class="setting-label" for="languageSelect" data-i18n="languageLabel">界面语言</label><select id="languageSelect"><option value="zh">简体中文</option><option value="en">English</option></select>
+          <label class="setting-label" for="cityInput" data-i18n="weatherCity">天气城市</label><div class="city-row"><input id="cityInput" value="厦门" maxlength="60"><button id="saveCity" class="soft-button" data-i18n="update">更新</button></div>
+          <div class="toggle-row"><label for="useLocation" data-i18n="locationLabel">根据定位显示天气</label><input id="useLocation" type="checkbox" role="switch"></div><p class="setting-hint" data-i18n="locationHint">默认关闭，开启后才请求系统位置。</p><p id="cityStatus" class="setting-hint" aria-live="polite">天气来自 Open-Meteo，需联网</p>
+        </section>
+      </div><div class="settings-footer"><span>Design by NEXT Studio</span><span>1.5</span></div>
+    </section>
+  </main>
+  <section class="mini-view" id="miniView" hidden><button class="mini-cube" id="expandMini" aria-label="展开日历"><span id="miniDay"></span><small>TIME³</small></button><p>点一下，展开时间</p></section>
+  <section class="toast-view" id="toastView" hidden><div class="toast-cube" aria-hidden="true"><span data-icon="bell"></span></div><div class="toast-copy"><span class="toast-brand">TIME³ <span>现在</span></span><strong id="toastTitle">留一点时间给自己</strong><button id="toastOpen">查看这一天 <span data-icon="arrow-up-right"></span></button></div><button class="icon-button" id="toastClose" aria-label="关闭提醒" data-icon="x"></button></section>
+  <div id="status" class="status" role="status" hidden></div>
+  <script type="module" src="app.js"></script>
+</body></html>

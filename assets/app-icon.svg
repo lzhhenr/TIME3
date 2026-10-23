@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="side" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e49a45"/><stop offset="1" stop-color="#c9762c"/></linearGradient>
+    <linearGradient id="face" x1=".1" y1="0" x2=".85" y2="1"><stop stop-color="#ffd68c"/><stop offset=".45" stop-color="#ffb963"/><stop offset="1" stop-color="#f39a41"/></linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2=".6" y2="1"><stop stop-color="#fff1ce"/><stop offset=".35" stop-color="#ffdc9c"/><stop offset="1" stop-color="#f5a64e"/></linearGradient>
+    <filter id="shadow" x="-.3" y="-.3" width="1.6" height="1.7"><feGaussianBlur stdDeviation="6"/></filter>
+  </defs>
+  <rect x="36" y="52" width="132" height="130" rx="37" fill="#804c26" opacity=".16" filter="url(#shadow)"/>
+  <rect x="32" y="38" width="137" height="137" rx="39" fill="url(#side)"/>
+  <rect x="40" y="30" width="136" height="136" rx="38" fill="url(#edge)"/>
+  <rect x="42" y="33" width="132" height="130" rx="36" fill="url(#face)"/>
+  <path d="M49 60Q55 34 81 34H137Q161 34 169 56" fill="none" stroke="#fff2ce" stroke-width="2" opacity=".65" stroke-linecap="round"/>
+  <text x="108" y="111" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="36" font-weight="700" letter-spacing=".2" fill="#fffdf5">TIME³</text>
+</svg>

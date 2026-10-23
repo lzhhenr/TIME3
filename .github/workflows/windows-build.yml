@@ -1,0 +1,25 @@
+name: Build Windows portable
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm run package
+      - name: Zip portable folder
+        shell: pwsh
+        run: Compress-Archive -Path dist/TIME3-v*-win-x64 -DestinationPath TIME3-Windows-portable.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TIME3-Windows-portable
+          path: TIME3-Windows-portable.zip

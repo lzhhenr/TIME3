@@ -1,0 +1,26 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent !important; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; user-select: none; }
+body { pointer-events: none; }
+.roller { position: absolute; width: 180px; height: 240px; top: 0; left: 0; will-change: transform; }
+#cubeVisual, #cubeVisual canvas { position: absolute; inset: 0; width: 180px; height: 240px; pointer-events: none; }
+.cube-hit { position: absolute; left: 42px; bottom: 0; width: 96px; height: 96px; border: 0; padding: 0; cursor: pointer; background: transparent; pointer-events: auto; border-radius: 22px; }
+.cube-hit:focus-visible { outline: 2px solid #f9f1e9; outline-offset: 3px; }
+.dismiss { position: absolute; right: 4px; top: 104px; border: 1px solid rgba(255,255,255,.7); background: rgba(66,53,47,.65); color: white; width: 25px; height: 25px; padding: 0 0 2px; border-radius: 50%; font-size: 19px; line-height: 22px; cursor: pointer; pointer-events: auto; opacity: 0; transition: opacity 160ms ease-out; }
+.settled .dismiss { opacity: .7; }
+.hint { position: absolute; bottom: 125px; left: 50%; width: 240px; transform: translate(-50%, 5px); padding: 13px 16px; border: 1px solid rgba(255,255,255,.8); border-radius: 18px; color: #3f302b; background: rgba(255,248,238,.98); box-shadow: 0 5px 20px rgba(50,30,15,.14); opacity: 0; transition: opacity 160ms ease-out, transform 160ms ease-out; pointer-events: none; }
+.hint::after { content: ''; position: absolute; left: calc(50% - 6px); bottom: -6px; width: 12px; height: 12px; transform: rotate(45deg); background: #fff8ee; }
+.hint span { display: block; font-size: 11px; color: #a56748; margin-bottom: 5px; }
+.hint strong { display: block; max-height: 38px; overflow: hidden; line-height: 19px; font-size: 13px; font-weight: 600; }
+.hint small { display: block; margin-top: 7px; font-size: 10px; color: #8b7c73; }
+.hovered .hint { opacity: 1; transform: translate(-50%, 0); }
+.hovered .dismiss { opacity: 1; }
+.fallback-cube { position: absolute; left: 52px; bottom: 0; display: grid; place-items: center; width: 76px; height: 76px; border-radius: 20px; background: linear-gradient(135deg,#ffb982,#e87540); color: #fff4e5; font-size: 28px; font-weight: 700; box-shadow: inset 2px 2px 3px #ffe0bf, inset -6px -7px 9px #b44f2880; }
+@media (prefers-reduced-motion: reduce) { .hint { transition: opacity 160ms ease-out; transform: translate(-50%,0); } }
+[hidden]{display:none!important}
+.roller,#cubeVisual,#cubeVisual canvas{height:360px}
+.dismiss{top:auto;bottom:108px;width:34px;height:34px;line-height:30px;font-size:20px;right:0}
+.hint{bottom:165px;width:300px;padding:12px 16px;background:#fff8ee;color:#43332c;box-shadow:0 5px 15px #1f130e26}
+.hint strong{max-height:66px;line-height:22px;font-size:14px;font-weight:500;overflow-wrap:anywhere}
+.health.settled .hint{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+.health #acknowledge{display:block;border:0;margin:11px auto 0;padding:7px 26px;min-height:34px;border-radius:10px;color:#fff7ed;background:#b96c3c;font:600 12px "Segoe UI","Microsoft YaHei",sans-serif;cursor:pointer}
+.health #acknowledge:hover{background:#a75a2d}.health #help{font-size:10px;color:#736355}

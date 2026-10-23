@@ -1,0 +1,10 @@
+node_modules/
+release/
+output/
+
+dist/
+github-upload/
+*.log
+.env
+.env.*
+

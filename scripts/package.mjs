@@ -1,0 +1,23 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {rcedit} from 'rcedit';
+import {verifyIcon} from './verify-exe-icon.mjs';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const pkg=JSON.parse(await fs.readFile(path.join(root,'package.json'),'utf8'));
+const name=`TIME3-v${pkg.version}-win-x64`,out=path.join(root,'dist',name);
+try{await fs.access(out);throw Error('Output already exists: '+out);}catch(e){if(e.code!=='ENOENT')throw e;}
+await fs.mkdir(path.dirname(out),{recursive:true});
+await fs.cp(path.join(root,'node_modules/electron/dist'),out,{recursive:true});
+await fs.rename(path.join(out,'electron.exe'),path.join(out,'TIME3.exe'));
+const target=path.join(out,'resources/app');await fs.mkdir(target,{recursive:true});
+const runtimeFiles=['index.html','app.js','calendar.mjs','i18n.mjs','mini.mjs','sound.mjs','style.css','scene.bundle.js','observances.bundle.js','roller.bundle.js','roller.css','roller.html','LUNAR-LICENSE.md','THIRD_PARTY_NOTICES.md'];
+for(const name of runtimeFiles)await fs.copyFile(path.join(root,name),path.join(target,name));
+await fs.cp(path.join(root,'assets'),path.join(target,'assets'),{recursive:true});
+await fs.cp(path.join(root,'electron'),path.join(target,'electron'),{recursive:true});
+await fs.writeFile(path.join(target,'package.json'),JSON.stringify({name:pkg.name,productName:pkg.productName,version:pkg.version,type:pkg.type,main:pkg.main},null,2));
+const icon=path.join(root,'assets/TIME3.ico'),exe=path.join(out,'TIME3.exe');
+await rcedit(exe,{icon,'file-version':pkg.version,'product-version':pkg.version,'version-string':{ProductName:'TIME3',FileDescription:'TIME³ Desktop Calendar',OriginalFilename:'TIME3.exe'}});
+const result=await verifyIcon(exe,icon);await fs.writeFile(path.join(root,'dist','icon-verification.json'),JSON.stringify(result,null,2));
+await fs.writeFile(path.join(out,'使用说明.txt'),'TIME³ 桌面日历 '+pkg.version+'\r\n\r\n双击 TIME3.exe 启动；请保留整个文件夹。\r\n提醒与设置保存在 %APPDATA%/TIME3，不在程序目录中。\r\n关闭窗口后仍在托盘运行；托盘右键退出。\r\n健康提醒默认关闭，在设置中开启。主动关闭健康提示也会重新计时。\r\n本版本无需外部 ICO 或快捷方式，EXE 本身已嵌入 TIME³ 图标。\r\n');
+console.log('Portable application ready: '+out);

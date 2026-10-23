@@ -1,0 +1,25 @@
+{
+  "name": "time-cube-desktop",
+  "productName": "TIME3",
+  "version": "1.5.0",
+  "description": "A tactile desktop calendar for Windows",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "electron .",
+    "preview": "node server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "package": "node scripts/package.mjs"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "esbuild": "^0.28.2",
+    "playwright": "1.58.2",
+    "rcedit": "^5.0.2"
+  },
+  "dependencies": {
+    "lunar-javascript": "^1.7.7",
+    "three": "^0.180.0"
+  }
+}

@@ -1,0 +1,217 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function run({ app, mainWindow, windows, store, tick, deliver, showMini, screen, miniController, wellness, advanceWellness }) {
+  const destination = process.env.TIME3_SMOKE_OUTPUT || path.join(app.getPath('userData'), 'smoke');
+  fs.mkdirSync(destination, { recursive: true });
+  const checks = [];
+  const errors = [];
+  mainWindow.webContents.on('console-message', event => { if (event.level === 'error') errors.push(event.message); });
+  try {
+    mainWindow.showInactive();
+    await delay(1800);
+    const capabilities = await mainWindow.webContents.executeJavaScript('({bridge:typeof window.desktop, node:typeof process, require:typeof require, title:document.title})');
+    assert.equal(capabilities.bridge, 'object'); assert.equal(capabilities.node, 'undefined'); assert.equal(capabilities.require, 'undefined');
+    checks.push('Renderer uses isolated bridge with Node disabled');
+    const prefs = mainWindow.webContents.getLastWebPreferences();
+    assert.equal(prefs.sandbox, true); assert.equal(prefs.contextIsolation, true); assert.equal(prefs.nodeIntegration, false);
+    checks.push('Renderer sandbox and context isolation enabled');
+    const reminderTime = new Date(Date.now()+3600000); const reminderLocal = new Date(reminderTime.getTime()-reminderTime.getTimezoneOffset()*60000).toISOString();
+    await mainWindow.webContents.executeJavaScript(`document.getElementById('reminderTitle').value='原生界面保存验证';document.getElementById('reminderTime').value='${reminderLocal.slice(11,16)}';document.getElementById('reminderForm').requestSubmit()`);
+    await delay(400);
+    assert.ok(store.get().reminders.some(r=>r.title==='原生界面保存验证'));
+    await mainWindow.webContents.reload(); await delay(800);
+    assert.ok(await mainWindow.webContents.executeJavaScript(`document.querySelector('.reminder-content')?.textContent.includes('原生界面保存验证')`));
+    checks.push('Native reminder form persists and survives window reload');
+    await mainWindow.webContents.executeJavaScript(`Promise.all(document.querySelector('.app').getAnimations().map(animation => animation.finished.catch(() => {})))`);
+    const screenshot = await mainWindow.webContents.capturePage();
+    fs.writeFileSync(path.join(destination, 'desktop.png'), screenshot.toPNG());
+    const now = new Date(), local = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString();
+    const state = { settings: { motion: 'roll', city: '厦门', alwaysOnTop: false, miniMode: false }, reminders: [{ id: 'smoke-reminder', title: '桌面提醒测试', date: local.slice(0, 10), time: local.slice(11, 16), done: false }] };
+    await mainWindow.webContents.executeJavaScript(`window.desktop.saveState(${JSON.stringify(state)})`);
+    mainWindow.hide();
+    await tick(); await delay(150);
+    const toast = [...windows.values()].find(entry => entry.role === 'roller');
+    assert.ok(toast && toast.win.isVisible()); assert.equal(mainWindow.isVisible(), false);
+    assert.ok(store.get().reminders[0].notifiedAt);
+    checks.push('Scheduled reminder appears in native desktop window while calendar hidden');
+    const toastPayload = await toast.win.webContents.executeJavaScript('window.desktop.getToast()');
+    assert.equal(toastPayload.title, '桌面提醒测试');
+    const bounds = toast.win.getBounds();
+    fs.writeFileSync(path.join(destination,'window-geometry.json'),JSON.stringify({bounds,content:toast.win.getContentBounds(),viewport:await toast.win.webContents.executeJavaScript('({w:innerWidth,h:innerHeight,dpr:devicePixelRatio,x:screenX,y:screenY})'),payload:toastPayload},null,2));
+    const actualFloor = await toast.win.webContents.executeJavaScript("screenY+document.getElementById('roller').getBoundingClientRect().bottom");
+    assert.ok(Math.abs(actualFloor-toastPayload.floor)<1, 'Actual rendered floor matches monitor work area, including fractional DPI');
+    const sample = () => toast.win.webContents.executeJavaScript(`({...document.getElementById('roller').dataset})`);
+    const entry = await sample();
+    fs.writeFileSync(path.join(destination, 'roller-entry.png'), (await toast.win.webContents.capturePage()).toPNG());
+    await delay(700);
+    const middle = await sample();
+    assert.ok(Number(middle.soundsPlayed)>0);assert.equal(middle.audioState,'running');
+    assert.ok(Number(middle.centerX) < Number(entry.centerX), 'Cube travels left from right edge');
+    assert.ok(Math.abs(Number(middle.contactY)-toastPayload.floor)<.1, 'Rolling cube contacts the taskbar top');
+    fs.writeFileSync(path.join(destination, 'roller-middle.png'), (await toast.win.webContents.capturePage()).toPNG());
+    await delay(1550);
+    const bounceSamples = [];
+    for (let n = 0; n < 9; n++) { bounceSamples.push(await sample()); await delay(70); }
+    assert.ok(bounceSamples.every(s => s.phase === 'bouncing' && Math.abs(Number(s.centerX) - toastPayload.area.width / 2) < 1));
+    assert.ok(bounceSamples.some(s => Number(s.jump) > 10), 'Cube bounces above floor after arriving');
+    assert.ok(bounceSamples.every(s => Number(s.contactY) <= toastPayload.floor), 'Cube never clips below the floor');
+    fs.writeFileSync(path.join(destination, 'roller-motion.json'), JSON.stringify({ bounds, payload: toastPayload, entry, middle, bounceSamples }, null, 2));
+    checks.push('Standalone cube rolls right to center along exact taskbar top and bounces above its ground');
+    fs.writeFileSync(path.join(destination, 'toast.png'), (await toast.win.webContents.capturePage()).toPNG());
+    const count = [...windows.values()].filter(entry => entry.role === 'roller').length;
+    await tick(); assert.equal([...windows.values()].filter(entry => entry.role === 'roller').length, count);
+    checks.push('Delivered reminder does not repeat');
+    await toast.win.webContents.executeJavaScript(`document.getElementById('cubeHit').click()`).catch(() => {});
+    await delay(200); assert.equal(mainWindow.isVisible(), true);
+    checks.push('Clicking a desktop reminder opens the calendar');
+    await deliver({ ...state.reminders[0], id: 'queue-first', title: 'First queued reminder' }, true);
+    const first = [...windows.values()].find(entry => entry.role === 'roller').win;
+    let nextShown = false;
+    const next = deliver({ ...state.reminders[0], id: 'queue-second', title: 'Second queued reminder' }, true).then(() => { nextShown = true; });
+    await delay(180);
+    assert.equal(first.isDestroyed(), false); assert.equal(nextShown, false);
+    assert.equal([...windows.values()].filter(entry => entry.role === 'roller').length, 1);
+    first.close();
+    await next;
+    const second = [...windows.values()].find(entry => entry.role === 'roller').win;
+    assert.equal(second.isVisible(), true);
+    assert.equal((await second.webContents.executeJavaScript('window.desktop.getToast()')).title, 'Second queued reminder');
+    second.close();
+    checks.push('Simultaneous rolling reminders queue without replacing the visible cube');
+    await deliver({ ...state.reminders[0], id: 'queue-gate', title: 'Queue gate' }, true);
+    const gate = [...windows.values()].find(entry => entry.role === 'roller').win;
+    const queued = { ...state.reminders[0], id: 'queue-cancelled', title: 'Cancelled while waiting' };
+    const beforeCancel = store.get(); beforeCancel.reminders.push(queued); store.save(beforeCancel);
+    const pending = deliver(queued);
+    const afterCancel = store.get(); afterCancel.reminders.find(item => item.id === queued.id).done = true; store.save(afterCancel);
+    gate.close();
+    assert.equal(await pending, false);
+    assert.equal([...windows.values()].filter(entry => entry.role === 'roller').length, 0);
+    checks.push('Completing a queued reminder prevents its stale cube from appearing');
+    const smooth = store.get(); smooth.settings.motion = 'smooth'; store.save(smooth);
+    await mainWindow.webContents.executeJavaScript('window.desktop.testNotification()');
+    const smoothToast = [...windows.values()].find(entry => entry.role === 'toast');
+    assert.ok(smoothToast?.win.isVisible()); smoothToast.win.close();
+    checks.push('Smooth mode and the settings preview work through the desktop bridge');
+    const disabledLocation = await mainWindow.webContents.executeJavaScript('window.desktop.getLocation().then(()=>false,()=>true)');
+    assert.equal(disabledLocation, true); checks.push('Location requests are blocked while the opt-in setting is disabled');
+    await mainWindow.webContents.executeJavaScript('window.desktop.setMini(true)'); await delay(450);
+    const mini = [...windows.values()].find(entry => entry.role === 'mini');
+    assert.ok(mini && mini.win.isVisible()); assert.equal(mainWindow.isVisible(), false);
+    fs.writeFileSync(path.join(destination, 'mini.png'), (await mini.win.webContents.capturePage()).toPNG());
+    checks.push('Calendar collapses to native floating cube');
+    const forbidden = await mini.win.webContents.executeJavaScript(`window.desktop.saveState(${JSON.stringify(state)}).then(()=>false,()=>true)`);
+    assert.equal(forbidden, true); checks.push('Mini window cannot modify reminder storage');
+    await mini.win.webContents.executeJavaScript('window.desktop.show()'); await delay(150);
+    assert.equal(mainWindow.isVisible(), true); assert.equal(mini.win.isVisible(), false);
+    checks.push('Floating cube reopens main calendar');
+    await mainWindow.webContents.executeJavaScript('window.desktop.setAlwaysOnTop(true)'); assert.equal(mainWindow.isAlwaysOnTop(), true);
+    checks.push('Always-on-top setting applies to native window');
+    const placementEvidence=[];
+    for(const position of ['top-left','bottom-left','top-right','bottom-right','center']){
+      const next=store.get();next.settings.windowPosition=position;
+      await mainWindow.webContents.executeJavaScript(`window.desktop.saveState(${JSON.stringify(next)})`);
+      const bounds=mainWindow.getBounds(),area=screen.getDisplayMatching(bounds).workArea;
+      const expected=require('./window-behavior.cjs').placementBounds(bounds,area,position);
+      assert.ok(Math.abs(bounds.x-expected.x)<=3&&Math.abs(bounds.y-expected.y)<=3,JSON.stringify({position,bounds,expected}));
+      placementEvidence.push({position,bounds});
+    }
+    fs.writeFileSync(path.join(destination,'placements.json'),JSON.stringify(placementEvidence,null,2));
+    assert.ok(Math.max(...placementEvidence.map(p=>p.bounds.width))-Math.min(...placementEvidence.map(p=>p.bounds.width))<=2,'Moving the window must not accumulate width');
+    checks.push('All five desktop placements use actual monitor work area');
+    const healthSettings=store.get();Object.assign(healthSettings.settings,{eyeEnabled:true,eyeMinutes:20,sedentaryEnabled:false,motion:'roll',soundEnabled:false});
+    await mainWindow.webContents.executeJavaScript(`window.desktop.saveState(${JSON.stringify(healthSettings)})`);
+    assert.equal(wellness.getStatus().eye.phase,'counting');
+    await advanceWellness(20*60000+100);
+    const health=[...windows.values()].find(entry=>entry.role==='roller'&&entry.payload.kind==='wellness');
+    assert.ok(health);await delay(2650);
+    const healthUI=await health.win.webContents.executeJavaScript(`({text:document.getElementById('title').textContent,bubble:getComputedStyle(document.getElementById('hint')).opacity,top:document.getElementById('hint').getBoundingClientRect().top,ack:document.getElementById('acknowledge').hidden,sounds:Number(document.getElementById('roller').dataset.soundsPlayed)})`);
+    assert.equal(healthUI.text,'用眼有度，光明在前；远眺片刻，视界清晰。');assert.ok(Number(healthUI.bubble)>.99);assert.ok(healthUI.top>=12,'Health message has space above it');assert.equal(healthUI.ack,false);assert.equal(healthUI.sounds,0);
+    fs.writeFileSync(path.join(destination,'wellness.png'),(await health.win.webContents.capturePage()).toPNG());
+    await health.win.webContents.executeJavaScript(`document.getElementById('acknowledge').click()`);await delay(260);
+    assert.equal(wellness.getStatus().eye.phase,'counting');assert.ok(wellness.getStatus().eye.remainingMs>19.9*60000);
+    checks.push('Eye reminder arrives with visible text and Got it restarts a full interval');
+    await advanceWellness(20*60000+100);
+    const toDismiss=[...windows.values()].find(entry=>entry.role==='roller'&&entry.payload.kind==='wellness');
+    assert.ok(toDismiss);await toDismiss.win.webContents.executeJavaScript('window.desktop.dismissToast()').catch(()=>{});await delay(70);
+    assert.equal(wellness.getStatus().eye.phase,'counting');assert.ok(wellness.getStatus().eye.remainingMs>19.9*60000);
+    checks.push('Explicitly closing a health reminder also confirms it and restarts its timer');
+    const disableHealth=store.get();disableHealth.settings.eyeEnabled=false;
+    await mainWindow.webContents.executeJavaScript(`window.desktop.saveState(${JSON.stringify(disableHealth)})`);
+    assert.equal(wellness.getStatus().eye.phase,'off');
+    checks.push('Disabled sound generates no reminder tones; health timers stop when disabled');
+    await testMiniDragging({mainWindow,windows,screen,miniController,destination});
+    checks.push('Native cube dragging does not open calendar; edge hide and cursor reveal work');
+    await regressionChecks({mainWindow,windows,store,wellness,advanceWellness,deliver,destination,checks});
+    fs.writeFileSync(path.join(destination, 'report.json'), JSON.stringify({ passed: true, checks, errors, version: app.getVersion(), electron: process.versions.electron, userData: app.getPath('userData') }, null, 2));
+    console.log('TIME3_SMOKE_PASS', JSON.stringify(checks));
+    app.exit(0);
+  } catch (error) {
+    fs.writeFileSync(path.join(destination, 'report.json'), JSON.stringify({ passed: false, checks, errors, error: error.stack }, null, 2));
+    console.error(error); app.exit(1);
+  }
+}
+async function testMiniDragging({mainWindow,windows,screen,miniController,destination}){
+  const {execFileSync}=require('node:child_process');
+  const original=screen.getCursorScreenPoint();
+  function moveCursor(point){const p=screen.dipToScreenPoint(point);const command=`Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class Time3CursorTest { [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern bool SetProcessDPIAware(); }'; [Time3CursorTest]::SetProcessDPIAware() | Out-Null; [Time3CursorTest]::SetCursorPos(${Math.round(p.x)},${Math.round(p.y)}) | Out-Null`;execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',command],{windowsHide:true,stdio:'ignore'});}
+  try{
+    await mainWindow.webContents.executeJavaScript('window.desktop.setMini(true)');await delay(200);
+    const mini=[...windows.values()].find(entry=>entry.role==='mini').win;mini.focus();await delay(200);
+    const cubePoint=()=>mini.webContents.executeJavaScript(`(()=>{const r=document.getElementById('expandMini').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,sx:screenX,sy:screenY,rotation:getComputedStyle(document.getElementById('expandMini')).transform,bar:getComputedStyle(document.getElementById('miniView'),'::before').display}})()`);
+    let point=await cubePoint();assert.equal(point.rotation,'none');assert.equal(point.bar,'none');
+    moveCursor({x:Math.round(point.sx+point.x),y:Math.round(point.sy+point.y)});
+    await delay(150);
+    const before=mini.getBounds();mini.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,x:Math.round(point.x),y:Math.round(point.y)});await delay(120);
+    const started=miniController().state();
+    moveCursor({x:Math.round(point.sx+point.x-110),y:Math.round(point.sy+point.y-45)});await delay(140);
+    mini.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,x:Math.round(point.x),y:Math.round(point.y)});await delay(100);
+    fs.writeFileSync(path.join(destination,'mini-drag.json'),JSON.stringify({point,before,started,after:mini.getBounds(),state:miniController().state()},null,2));
+    assert.ok(Math.abs(mini.getBounds().x-before.x)>60);assert.equal(mainWindow.isVisible(),false);
+    assert.ok(Math.abs(mini.getBounds().width-before.width)<=2,'Dragging must not grow the mini window: '+JSON.stringify({before,after:mini.getBounds()}));
+    point=await cubePoint();moveCursor({x:Math.round(point.sx+point.x),y:Math.round(point.sy+point.y)});
+    mini.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,x:Math.round(point.x),y:Math.round(point.y)});await delay(60);
+    const bounds=mini.getBounds(),area=screen.getDisplayMatching(bounds).workArea;
+    moveCursor({x:Math.round(area.x+point.x),y:Math.round(point.sy+point.y)});await delay(150);
+    mini.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,x:Math.round(point.x),y:Math.round(point.y)});await delay(100);
+    assert.equal(miniController().state().edge,'left');
+    moveCursor({x:Math.round(area.x+area.width/2),y:Math.round(area.y+50)});await delay(1250);
+    assert.equal(miniController().state().hidden,true);
+    fs.writeFileSync(path.join(destination,'mini-edge.png'),(await mini.webContents.capturePage()).toPNG());
+    const dock=mini.getBounds();moveCursor({x:dock.x+2,y:Math.round(dock.y+dock.height/2)});await delay(250);
+    assert.equal(miniController().state().hidden,false);
+    fs.writeFileSync(path.join(destination,'mini-frontal.png'),(await mini.webContents.capturePage()).toPNG());
+    await mini.webContents.executeJavaScript(`document.getElementById('expandMini').click()`);await delay(100);assert.equal(mainWindow.isVisible(),true);
+  }finally{moveCursor(original);}
+}
+module.exports = { run };
+async function regressionChecks({mainWindow,windows,store,wellness,advanceWellness,deliver,destination,checks}){
+ const {BrowserWindow}=require('electron');
+ const {execFileSync}=require('node:child_process');
+ function above(win,other){const a=win.getNativeWindowHandle().readBigUInt64LE().toString(),b=other.getNativeWindowHandle().readBigUInt64LE().toString();const cmd=`Add-Type 'using System; using System.Runtime.InteropServices; public class ZOrderTest { [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr w,uint n); public static bool Above(long a,long b){IntPtr p=new IntPtr(b);for(int i=0;i<500;i++){p=GetWindow(p,3);if(p==IntPtr.Zero)return false;if(p.ToInt64()==a)return true;}return false;}}';[ZOrderTest]::Above(${a},${b})`;return execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',cmd],{encoding:'utf8',windowsHide:true}).trim()==='True';}
+ const next=store.get();Object.assign(next.settings,{motion:'smooth',alwaysOnTop:true,codexEnabled:true,codexMinutes:300,miniMode:true});
+ await mainWindow.webContents.executeJavaScript(`window.desktop.saveState(${JSON.stringify(next)})`);
+ const clock=await mainWindow.webContents.executeJavaScript('window.desktop.getSystemClock()');assert.ok(Math.abs(clock.epoch-Date.now())<1500);assert.equal(clock.offset,new Date().getTimezoneOffset());
+ assert.equal(await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-i18n="todayColorHint"]')`),null);
+ assert.equal(await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-i18n="textContrastHint"]')`),null);
+ assert.ok(await mainWindow.webContents.executeJavaScript(`document.querySelector('.settings-footer').textContent.includes('Design by NEXT Studio')`));
+ checks.push('Windows clock and renderer agree; removed hints and designer footer verified');
+ await mainWindow.webContents.executeJavaScript('window.desktop.setMini(true)');await delay(200);
+ await advanceWellness(300*60000+100);
+ const codex=[...windows.values()].find(e=>e.payload?.wellnessType==='codex');assert.ok(codex);await delay(100);
+ const mini=[...windows.values()].find(e=>e.role==='mini');assert.ok(await mini.win.webContents.executeJavaScript(`document.getElementById('expandMini').getAnimations().length>0`));
+ await codex.win.webContents.executeJavaScript('window.desktop.acknowledgeReminder()').catch(()=>{});await delay(100);assert.equal(wellness.getStatus().codex.phase,'counting');
+ checks.push('Five-hour Codex reminder triggers, pinned mini shakes, and acknowledgement resets timer');
+ const samples=[];
+ for(let i=0;i<3;i++){await mainWindow.webContents.executeJavaScript('window.desktop.setMini(true)');const start=Date.now();await mini.win.webContents.executeJavaScript('window.desktop.show()');await mainWindow.webContents.executeJavaScript('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');samples.push(Date.now()-start);}
+ assert.ok(Math.max(...samples)<600,JSON.stringify(samples));fs.writeFileSync(path.join(destination,'reopen-latency.json'),JSON.stringify(samples));
+ checks.push('Smooth-mode mini-to-calendar reopening paints without replaying the entrance');
+ const rival=new BrowserWindow({show:false,fullscreen:true,alwaysOnTop:true,skipTaskbar:true,webPreferences:{sandbox:true}});
+ try{
+  await rival.loadURL('data:text/html,<body style="background:black;color:white">TIME3 full-screen overlay verification</body>');rival.show();rival.moveTop();await delay(900);assert.ok(above(mainWindow,rival),'Pinned calendar recovers above full-screen topmost window');
+  for(const motion of ['smooth','roll']){const state=store.get();state.settings.motion=motion;await mainWindow.webContents.executeJavaScript(`window.desktop.saveState(${JSON.stringify(state)})`);await deliver({id:'overlay-test',date:clock.date,time:clock.time,title:'全屏置顶验证'},true);const entry=[...windows.values()].find(e=>e.role===(motion==='roll'?'roller':'toast'));assert.ok(entry);rival.moveTop();await delay(1000);assert.ok(above(entry.win,rival),'Reminder recovers above full-screen topmost window');assert.ok(above(entry.win,mainWindow),'Reminder is above pinned calendar');assert.equal(rival.isFocused(),true);entry.win.close();}
+  checks.push('Both reminder modes and pinned calendar recover above a full-screen always-on-top competitor without stealing focus');
+ }finally{rival.destroy();}
+}
