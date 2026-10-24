@@ -4,21 +4,22 @@ mod portable;
 mod store;
 use chrono::{Local, NaiveDateTime, TimeZone};
 use serde_json::{json, Value};
-use std::{collections::{HashMap, VecDeque}, path::PathBuf, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::{Duration, Instant}};
+use std::{collections::{HashMap, VecDeque}, path::PathBuf, sync::{Mutex, atomic::{AtomicBool, AtomicU64, Ordering}}, time::{Duration, Instant}};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow, WebviewWindowBuilder, WebviewUrl, PhysicalPosition, PhysicalSize};
 
 #[derive(Clone)]
 struct Popup { payload: Value, opened: Instant, regions: Vec<Value>, ready: bool, viewport_width: f64 }
 #[derive(Default)]
 struct Runtime { popups: HashMap<String,Popup>, queue: VecDeque<(Value,bool)>, mini: native::MiniController }
-struct Backend { store: Mutex<store::Store>, runtime: Mutex<Runtime>, data: PathBuf }
+struct Backend { store: Mutex<store::Store>, runtime: Mutex<Runtime>, data: PathBuf, mini_visible: AtomicBool }
+struct TrayControls { mini: tauri::menu::CheckMenuItem<tauri::Wry> }
 static SERIAL: AtomicU64 = AtomicU64::new(1);
 fn backend(app:&AppHandle)->tauri::State<'_,Backend>{app.state::<Backend>()}
 fn settings(app:&AppHandle)->Value{backend(app).store.lock().unwrap().settings()}
 fn clock()->Value { let n=Local::now();json!({"epoch":n.timestamp_millis(),"date":n.format("%Y-%m-%d").to_string(),"time":n.format("%H:%M").to_string(),"offset":-n.offset().local_minus_utc()/60}) }
 fn emit_state(app:&AppHandle){ let b=backend(app);let s=b.store.lock().unwrap();let _=app.emit("calendar:state-changed",s.get());let _=app.emit("wellness:state",s.wellness_status(Local::now())); }
 fn base<'a>(app:&'a AppHandle,label:&str,url:&str)->WebviewWindowBuilder<'a,tauri::Wry,AppHandle>{
- WebviewWindowBuilder::new(app,label,WebviewUrl::App(url.into())).title("TIME³ · WebView2 试用版").decorations(false).transparent(true).shadow(false).visible(false).focused(false).maximizable(false).disable_drag_drop_handler().data_directory(backend(app).data.join("WebView2")).additional_browser_args("--autoplay-policy=no-user-gesture-required").on_navigation(|url|url.host_str()==Some("tauri.localhost")||url.scheme()=="tauri").on_page_load(|w,p|{if p.event()==tauri::webview::PageLoadEvent::Finished{if w.label()=="main"{let _=w.show();}else{native::show_inactive(&w);}}})
+ WebviewWindowBuilder::new(app,label,WebviewUrl::App(url.into())).title("TIME³ · WebView2 试用版").decorations(false).transparent(true).shadow(false).visible(false).focused(false).maximizable(false).disable_drag_drop_handler().data_directory(backend(app).data.join("WebView2")).additional_browser_args("--autoplay-policy=no-user-gesture-required").on_navigation(|url|url.host_str()==Some("tauri.localhost")||url.scheme()=="tauri").on_page_load(|w,p|{if p.event()==tauri::webview::PageLoadEvent::Finished{if w.label()=="main"{let _=w.show();}else if w.label()!="mini"||backend(w.app_handle()).mini_visible.load(Ordering::SeqCst){native::show_inactive(&w);}}})
 }
 fn place(w:&WebviewWindow,position:&str){
  let a=native::area(Some(w));let z=w.outer_size().unwrap_or(PhysicalSize::new(1180,820));let m=(16.0*a.scale) as i32;
@@ -26,22 +27,29 @@ fn place(w:&WebviewWindow,position:&str){
  let y=if position.starts_with("top"){a.y+m}else if position.starts_with("bottom"){a.y+a.height as i32-z.height as i32-m}else{a.y+(a.height as i32-z.height as i32)/2};
  let _=w.set_position(PhysicalPosition::new(x.max(a.x),y.max(a.y)));
 }
-fn show_main(app:&AppHandle,date:Value){
+fn hide_mini(app:&AppHandle){
+ backend(app).mini_visible.store(false,Ordering::SeqCst);
  if let Some(w)=app.get_webview_window("mini"){native::hide_auxiliary(&w);backend(app).runtime.lock().unwrap().mini.on_hide(&w);}
+}
+fn show_main(app:&AppHandle,date:Value){
+ hide_mini(app);
  if let Some(w)=app.get_webview_window("main"){let _=w.unminimize();let _=w.show();let _=w.set_focus();let _=w.emit("calendar:open-date",date);}
 }
 fn show_mini(app:&AppHandle)->Result<(),String>{
+ if settings(app)["miniMode"]!=true{return Ok(());}
+ backend(app).mini_visible.store(true,Ordering::SeqCst);
  let w=if let Some(w)=app.get_webview_window("mini"){w}else{
   let a=native::area(None);
   let w=base(app,"mini","index.html?mode=mini").inner_size(112.0,112.0).resizable(false).skip_taskbar(true).always_on_top(true).build().map_err(|e|e.to_string())?;
   let _=w.set_position(PhysicalPosition::new(a.x+a.width as i32-(144.0*a.scale) as i32,a.y+a.height as i32-(144.0*a.scale) as i32));w
  };
- native::show_inactive(&w);backend(app).runtime.lock().unwrap().mini.on_show(&w);Ok(())
+ if backend(app).mini_visible.load(Ordering::SeqCst)&&settings(app)["miniMode"]==true{native::show_inactive(&w);backend(app).runtime.lock().unwrap().mini.on_show(&w);}else{hide_mini(app);}Ok(())
 }
 fn hide_main(app:&AppHandle){if let Some(w)=app.get_webview_window("main"){let _=w.hide();}if settings(app)["miniMode"]==true{let _=show_mini(app);}}
 fn sync_settings(app:&AppHandle,old:&Value){
  let s=settings(app);if let Some(w)=app.get_webview_window("main"){let _=w.set_always_on_top(s["alwaysOnTop"]==true);if old["windowPosition"]!=s["windowPosition"]{place(&w,s["windowPosition"].as_str().unwrap_or("center"));}}
- if s["miniMode"]!=true {if let Some(w)=app.get_webview_window("mini"){native::hide_auxiliary(&w);backend(app).runtime.lock().unwrap().mini.on_hide(&w);}}
+ if let Some(tray)=app.try_state::<TrayControls>(){let _=tray.mini.set_checked(s["miniMode"]==true);}
+ if s["miniMode"]!=true {hide_mini(app);}
  prune(app);emit_state(app);
 }
 fn current_calendar(state:&Value,queued:&Value,now:chrono::DateTime<Local>)->Option<Value>{
@@ -124,7 +132,7 @@ async fn desktop(app:AppHandle,window:WebviewWindow,method:String,args:Vec<Value
 fn poll(app:AppHandle){
  let mut second=Instant::now()-Duration::from_secs(2);let mut raise_at=Instant::now();
  loop{std::thread::sleep(Duration::from_millis(32));let b=backend(&app);
-  if let Some(w)=app.get_webview_window("mini"){b.runtime.lock().unwrap().mini.tick(&w);}
+  if b.mini_visible.load(Ordering::SeqCst){if let Some(w)=app.get_webview_window("mini"){b.runtime.lock().unwrap().mini.tick(&w);}}
   // Never hold the reminder registry across synchronous window operations.
   // A stale/closed window cannot keep ownership of the presentation queue.
   let (popups,queued)={let r=b.runtime.lock().unwrap();(r.popups.clone(),!r.queue.is_empty())};
@@ -157,10 +165,11 @@ fn tray_action(app:AppHandle,id:String){
   "open"=>show_main(&app,Value::Null),
   "mini"=>{
    let old=settings(&app);let mut state=backend(&app).store.lock().unwrap().get();
-   if state.is_null(){state=json!({"reminders":[],"settings":old});}
-   state["settings"]["miniMode"]=json!(true);
+   if state.is_null(){state=json!({"reminders":[],"settings":old.clone()});}
+   let enabled=old["miniMode"]!=true;
+   state["settings"]["miniMode"]=json!(enabled);
    let saved=backend(&app).store.lock().unwrap().save(state,Local::now());
-   match saved{Ok(_)=>{sync_settings(&app,&old);hide_main(&app);},Err(e)=>eprintln!("Unable to save mini mode: {e}")}
+   match saved{Ok(_)=>{sync_settings(&app,&old);if enabled{hide_main(&app);}},Err(e)=>{if let Some(tray)=app.try_state::<TrayControls>(){let _=tray.mini.set_checked(old["miniMode"]==true);}eprintln!("Unable to save mini mode: {e}")}}
   },
   "quit"=>app.exit(0),_=>{}
  }
@@ -168,9 +177,9 @@ fn tray_action(app:AppHandle,id:String){
 fn main(){
  tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app,_,_|{let app=app.clone();std::thread::spawn(move||show_main(&app,Value::Null));})).invoke_handler(tauri::generate_handler![desktop]).setup(|app|{
   let data=portable::prepare()?;
-  let store=store::Store::load(data.clone()).map_err(std::io::Error::other)?;app.manage(Backend{store:Mutex::new(store),runtime:Mutex::new(Runtime::default()),data});let h=app.handle();let a=native::area(None);
+  let store=store::Store::load(data.clone()).map_err(std::io::Error::other)?;app.manage(Backend{store:Mutex::new(store),runtime:Mutex::new(Runtime::default()),data,mini_visible:AtomicBool::new(false)});let h=app.handle();let a=native::area(None);
   let w=base(h,"main","index.html").inner_size((a.width as f64/a.scale-24.0).min(1180.0),(a.height as f64/a.scale-24.0).min(820.0)).min_inner_size(720.0,600.0).always_on_top(settings(h)["alwaysOnTop"]==true).build()?;place(&w,settings(h)["windowPosition"].as_str().unwrap_or("center"));
-  let open=tauri::menu::MenuItem::with_id(app,"open","打开 TIME³",true,None::<&str>)?;let mini=tauri::menu::MenuItem::with_id(app,"mini","悬浮方块",true,None::<&str>)?;let quit=tauri::menu::MenuItem::with_id(app,"quit","退出（停止提醒）",true,None::<&str>)?;let menu=tauri::menu::Menu::with_items(app,&[&open,&mini,&quit])?;
+  let open=tauri::menu::MenuItem::with_id(app,"open","打开 TIME³",true,None::<&str>)?;let mini=tauri::menu::CheckMenuItem::with_id(app,"mini","悬浮方块",true,settings(h)["miniMode"]==true,None::<&str>)?;let quit=tauri::menu::MenuItem::with_id(app,"quit","退出（停止提醒）",true,None::<&str>)?;let menu=tauri::menu::Menu::with_items(app,&[&open,&mini,&quit])?;app.manage(TrayControls{mini});
   tauri::tray::TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).tooltip("TIME³ · WebView2 试用版").menu(&menu).show_menu_on_left_click(false).on_menu_event(|app,e|{let app=app.clone();let id=e.id.as_ref().to_string();std::thread::spawn(move||tray_action(app,id));}).on_tray_icon_event(|tray,event|{if matches!(event,tauri::tray::TrayIconEvent::Click{button:tauri::tray::MouseButton::Left,button_state:tauri::tray::MouseButtonState::Up,..}){let app=tray.app_handle().clone();std::thread::spawn(move||show_main(&app,Value::Null));}}).build(app)?;
   let handle=app.handle().clone();std::thread::spawn(move||poll(handle));Ok(())
  }).on_window_event(|w,event|{if w.label()=="main"{if let tauri::WindowEvent::CloseRequested{api,..}=event{api.prevent_close();let app=w.app_handle().clone();std::thread::spawn(move||hide_main(&app));}}}).build(tauri::generate_context!()).expect("Unable to start TIME3").run(|_,event|{if let tauri::RunEvent::ExitRequested{code:None,api,..}=event{api.prevent_exit();}});
