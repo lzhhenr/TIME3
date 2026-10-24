@@ -2,7 +2,7 @@
 
 <img src="assets/icon-256.png" width="128" alt="TIME³ icon">
 
-A tactile Windows desktop calendar, with a little reminder cube that rolls along the taskbar and bounces into view. Design by NEXT Studio.
+A tactile Windows desktop calendar, with a little reminder cube that rolls along the taskbar and bounces into view. 
 
 ![TIME³ calendar preview](docs/preview.png)
 
