@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod native;
+mod portable;
 mod store;
 use chrono::{Local, NaiveDateTime, TimeZone};
 use serde_json::{json, Value};
@@ -166,8 +167,7 @@ fn tray_action(app:AppHandle,id:String){
 }
 fn main(){
  tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app,_,_|{let app=app.clone();std::thread::spawn(move||show_main(&app,Value::Null));})).invoke_handler(tauri::generate_handler![desktop]).setup(|app|{
-  let root=PathBuf::from(std::env::var_os("APPDATA").ok_or("APPDATA unavailable")?);let smoke=std::env::var_os("TIME3_SMOKE_DATA");let data=smoke.clone().map(PathBuf::from).unwrap_or(root.join("TIME3-Tauri"));std::fs::create_dir_all(&data)?;
-  if smoke.is_none()&&!data.join("migration-complete").exists(){for name in ["calendar-state.json","wellness-state.json"]{let old=root.join("TIME3").join(name);let new=data.join(name);if old.exists()&&!new.exists(){std::fs::copy(&old,&new)?;}}std::fs::write(data.join("migration-complete"),"Copied from TIME3; original data unchanged.")?;}
+  let data=portable::prepare()?;
   let store=store::Store::load(data.clone()).map_err(std::io::Error::other)?;app.manage(Backend{store:Mutex::new(store),runtime:Mutex::new(Runtime::default()),data});let h=app.handle();let a=native::area(None);
   let w=base(h,"main","index.html").inner_size((a.width as f64/a.scale-24.0).min(1180.0),(a.height as f64/a.scale-24.0).min(820.0)).min_inner_size(720.0,600.0).always_on_top(settings(h)["alwaysOnTop"]==true).build()?;place(&w,settings(h)["windowPosition"].as_str().unwrap_or("center"));
   let open=tauri::menu::MenuItem::with_id(app,"open","打开 TIME³",true,None::<&str>)?;let mini=tauri::menu::MenuItem::with_id(app,"mini","悬浮方块",true,None::<&str>)?;let quit=tauri::menu::MenuItem::with_id(app,"quit","退出（停止提醒）",true,None::<&str>)?;let menu=tauri::menu::Menu::with_items(app,&[&open,&mini,&quit])?;
