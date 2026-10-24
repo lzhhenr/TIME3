@@ -55,3 +55,6 @@ body[data-palette="klein"]{--theme-cube:#002fa7}
 .palette-option[data-palette="klein"] .palette-dots i{background:#dce4f8}.palette-option[data-palette="klein"] .palette-dots i:nth-child(2){background:#7090da}.palette-option[data-palette="klein"] .palette-dots i:nth-child(3){background:#002fa7}.palette-option[data-palette="klein"] .palette-dots i:nth-child(4){background:#001e70}
 body:is([data-palette="monochrome"],[data-palette="green"],[data-palette="klein"]) .fallback .date-cell.weekend:not(.outside):not(.today){background:var(--theme-cube);color:#fffdf8}
 body[data-palette="green"] .fallback .date-cell.weekend:not(.outside):not(.today){color:#163c2d}
+
+/* Keep reminder typing free of the global orange focus frame. */
+.reminder-form input:focus,.reminder-form input:focus-visible{outline:none}
