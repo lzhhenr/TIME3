@@ -114,6 +114,42 @@ pub fn show_inactive(window: &WebviewWindow) {
 #[cfg(not(windows))]
 pub fn show_inactive(window: &WebviewWindow) { let _ = window.show(); }
 
+// Auxiliary windows are shown with ShowWindow(SW_SHOWNOACTIVATE), outside
+// Tao's cached VISIBLE flag. Its style setters would reapply that stale flag
+// and hide the window. Keep auxiliary visibility and mouse styles in Win32,
+// preserving all unrelated styles and the foreground application.
+#[cfg(windows)]
+pub fn hide_auxiliary(window: &WebviewWindow) {
+    use windows_sys::Win32::{Foundation::HWND, UI::WindowsAndMessaging::{ShowWindow, SW_HIDE}};
+    if let Ok(handle) = window.hwnd() {
+        let hwnd = handle.0 as usize;
+        let _ = window.run_on_main_thread(move || unsafe { ShowWindow(hwnd as HWND, SW_HIDE); });
+    }
+}
+#[cfg(not(windows))]
+pub fn hide_auxiliary(window: &WebviewWindow) { let _ = window.hide(); }
+
+#[cfg(windows)]
+pub fn set_cursor_passthrough(window: &WebviewWindow, ignored: bool) {
+    use windows_sys::Win32::{Foundation::HWND, UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TRANSPARENT, WS_EX_LAYERED,
+    }};
+    if let Ok(handle) = window.hwnd() {
+        let hwnd = handle.0 as usize;
+        let _ = window.run_on_main_thread(move || unsafe {
+            let hwnd = hwnd as HWND;
+            let old = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            let mask = (WS_EX_TRANSPARENT | WS_EX_LAYERED) as isize;
+            let next = if ignored { old | mask } else { old & !mask };
+            if old != next { SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next); }
+        });
+    }
+}
+#[cfg(not(windows))]
+pub fn set_cursor_passthrough(window: &WebviewWindow, ignored: bool) {
+    let _ = window.set_ignore_cursor_events(ignored);
+}
+
 /// Called only after the user enables system location. No network/IP lookup.
 /// Keep the existing Windows permission prompt and a bounded helper lifetime.
 #[cfg(windows)]
@@ -270,7 +306,7 @@ impl MiniController {
         self.hold_until = Some(self.hold_until.map(|old| old.max(until)).unwrap_or(until));
         self.hidden = false;
         self.leave_at = None;
-        let _ = window.set_ignore_cursor_events(false);
+        set_cursor_passthrough(window, false);
         self.publish(window);
     }
 
@@ -328,7 +364,7 @@ impl MiniController {
     pub fn on_show(&mut self, window: &WebviewWindow) {
         self.hidden = false;
         self.leave_at = Some(Instant::now());
-        let _ = window.set_ignore_cursor_events(false);
+        set_cursor_passthrough(window, false);
         self.publish(window);
     }
 
@@ -336,7 +372,7 @@ impl MiniController {
         self.drag = None;
         self.hidden = false;
         self.leave_at = None;
-        let _ = window.set_ignore_cursor_events(false);
+        set_cursor_passthrough(window, false);
         self.publish(window);
     }
 
@@ -376,7 +412,7 @@ impl MiniController {
             if now.duration_since(left) >= Duration::from_millis(900) {
                 self.hidden = true;
                 self.leave_at = None;
-                let _ = window.set_ignore_cursor_events(true);
+                set_cursor_passthrough(window, true);
                 self.publish(window);
             }
         } else { self.leave_at = Some(now); }

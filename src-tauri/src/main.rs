@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use std::{collections::{HashMap, VecDeque}, path::PathBuf, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::{Duration, Instant}};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow, WebviewWindowBuilder, WebviewUrl, PhysicalPosition, PhysicalSize};
 
+#[derive(Clone)]
 struct Popup { payload: Value, opened: Instant, regions: Vec<Value>, ready: bool, viewport_width: f64 }
 #[derive(Default)]
 struct Runtime { popups: HashMap<String,Popup>, queue: VecDeque<(Value,bool)>, mini: native::MiniController }
@@ -25,7 +26,7 @@ fn place(w:&WebviewWindow,position:&str){
  let _=w.set_position(PhysicalPosition::new(x.max(a.x),y.max(a.y)));
 }
 fn show_main(app:&AppHandle,date:Value){
- if let Some(w)=app.get_webview_window("mini"){let _=w.hide();backend(app).runtime.lock().unwrap().mini.on_hide(&w);}
+ if let Some(w)=app.get_webview_window("mini"){native::hide_auxiliary(&w);backend(app).runtime.lock().unwrap().mini.on_hide(&w);}
  if let Some(w)=app.get_webview_window("main"){let _=w.unminimize();let _=w.show();let _=w.set_focus();let _=w.emit("calendar:open-date",date);}
 }
 fn show_mini(app:&AppHandle)->Result<(),String>{
@@ -39,7 +40,7 @@ fn show_mini(app:&AppHandle)->Result<(),String>{
 fn hide_main(app:&AppHandle){if let Some(w)=app.get_webview_window("main"){let _=w.hide();}if settings(app)["miniMode"]==true{let _=show_mini(app);}}
 fn sync_settings(app:&AppHandle,old:&Value){
  let s=settings(app);if let Some(w)=app.get_webview_window("main"){let _=w.set_always_on_top(s["alwaysOnTop"]==true);if old["windowPosition"]!=s["windowPosition"]{place(&w,s["windowPosition"].as_str().unwrap_or("center"));}}
- if s["miniMode"]!=true {if let Some(w)=app.get_webview_window("mini"){let _=w.hide();}}
+ if s["miniMode"]!=true {if let Some(w)=app.get_webview_window("mini"){native::hide_auxiliary(&w);backend(app).runtime.lock().unwrap().mini.on_hide(&w);}}
  prune(app);emit_state(app);
 }
 fn current_calendar(state:&Value,queued:&Value,now:chrono::DateTime<Local>)->Option<Value>{
@@ -81,7 +82,7 @@ fn present_next(app:&AppHandle)->Result<(),String>{
  backend(app).runtime.lock().unwrap().popups.insert(label.clone(),Popup{payload:p.clone(),opened:Instant::now(),regions:vec![],ready:false,viewport_width:0.0});
  let result=base(app,&label,if roll{"roller.html"}else{"index.html?mode=toast"}).inner_size(width,height).resizable(false).skip_taskbar(true).always_on_top(true).focusable(false).build();
  match result {
-  Ok(w)=>{let _=w.set_position(PhysicalPosition::new(x,y));if roll{let _=w.set_ignore_cursor_events(true);}Ok(())},
+  Ok(w)=>{let _=w.set_position(PhysicalPosition::new(x,y));if roll{native::set_cursor_passthrough(&w,true);}Ok(())},
   Err(e)=>{backend(app).runtime.lock().unwrap().popups.remove(&label);Err(e.to_string())}
  }
 }
@@ -110,7 +111,9 @@ async fn desktop(app:AppHandle,window:WebviewWindow,method:String,args:Vec<Value
  "reminder:get-toast"=>{require(role,&["reminder"])?;Ok(b.runtime.lock().unwrap().popups.get(&label).map(|p|p.payload.clone()).unwrap_or(Value::Null))},
  "reminder:dismiss"|"reminder:acknowledge"=>{require(role,&["reminder"])?;close_popup(&app,&label,true);Ok(Value::Null)},
  "reminder:open"=>{require(role,&["reminder"])?;show_main(&app,a);close_popup(&app,&label,false);Ok(Value::Null)},
- "reminder:interactive"=>{require(role,&["reminder"])?;window.set_ignore_cursor_events(a!=true).map_err(|e|e.to_string())?;Ok(Value::Null)},
+ // Native hit testing is the sole owner of rolling-window input. DOM leave
+ // events must not switch the window back underneath the native hover poll.
+ "reminder:interactive"=>{require(role,&["reminder"])?;Ok(Value::Null)},
  "reminder:hit-regions"=>{require(role,&["reminder"])?;if let Some(p)=b.runtime.lock().unwrap().popups.get_mut(&label){p.regions=a.as_array().filter(|x|x.len()<20).cloned().unwrap_or_default();p.viewport_width=args.get(1).and_then(|v|v["width"].as_f64()).filter(|v|v.is_finite()&&*v>0.0).unwrap_or(0.0);}Ok(Value::Null)},
  "app:ready"=>{require(role,&["reminder"])?;let payload={let mut r=b.runtime.lock().unwrap();r.popups.get_mut(&label).filter(|p|!p.ready).map(|p|{p.ready=true;p.opened=Instant::now();p.payload.clone()})};if let Some(p)=payload{native::show_inactive(&window);if p["preview"]!=true{b.store.lock().unwrap().mark_delivered(&p,Local::now())?;}if let Some(main)=app.get_webview_window("main"){let _=main.emit("reminder:fired",p.clone());}let s=settings(&app);if s["alwaysOnTop"]==true&&s["miniMode"]==true{if let Some(m)=app.get_webview_window("mini"){if m.is_visible().unwrap_or(false){b.runtime.lock().unwrap().mini.reveal(&m,3200);let _=m.emit("mini:alert",p);}}}emit_state(&app);}Ok(json!(true))},
  "app:diagnostic"=>{if std::env::var_os("TIME3_SMOKE_DATA").is_none(){return Err("Diagnostics disabled".into());}let _=std::fs::write(b.data.join(format!("diagnostic-{}.json",label)),a.to_string());let count=b.runtime.lock().unwrap().popups.get(&label).map(|p|p.regions.len()).unwrap_or(0);let pos=window.outer_position().map_err(|e|e.to_string())?;let size=window.outer_size().map_err(|e|e.to_string())?;Ok(json!({"regionCount":count,"visible":window.is_visible().unwrap_or(false),"alwaysOnTop":window.is_always_on_top().unwrap_or(false),"bounds":{"x":pos.x,"y":pos.y,"width":size.width,"height":size.height},"workArea":native::area(Some(&window)),"scaleFactor":window.scale_factor().unwrap_or(1.0)}))},
@@ -121,12 +124,28 @@ fn poll(app:AppHandle){
  let mut second=Instant::now()-Duration::from_secs(2);let mut raise_at=Instant::now();
  loop{std::thread::sleep(Duration::from_millis(32));let b=backend(&app);
   if let Some(w)=app.get_webview_window("mini"){b.runtime.lock().unwrap().mini.tick(&w);}
-  let mut expired=vec![];{let r=b.runtime.lock().unwrap();for (label,p) in &r.popups{
-   if p.opened.elapsed().as_secs()>=if !p.ready{12}else if p.payload["motion"]=="roll"{45}else{18}{expired.push(label.clone());continue;}
-   if p.payload["motion"]=="roll"{if let Some(w)=app.get_webview_window(label){let cursor=native::cursor();let pos=w.outer_position().unwrap_or_default();let scale=if p.viewport_width>0.0{w.inner_size().unwrap_or_default().width as f64/p.viewport_width}else{w.scale_factor().unwrap_or(1.0)};let x=(cursor.0-pos.x)as f64/scale;let y=(cursor.1-pos.y)as f64/scale;
-    let hit=p.regions.iter().any(|v|{let rx=v["x"].as_f64().unwrap_or(-9999.);let ry=v["y"].as_f64().unwrap_or(-9999.);x>=rx&&y>=ry&&x<=rx+v["width"].as_f64().unwrap_or(0.)&&y<=ry+v["height"].as_f64().unwrap_or(0.)});let _=w.set_ignore_cursor_events(!hit);
-   }}
-  }}for l in expired{close_popup(&app,&l,false);}
+  // Never hold the reminder registry across synchronous window operations.
+  // A stale/closed window cannot keep ownership of the presentation queue.
+  let (popups,queued)={let r=b.runtime.lock().unwrap();(r.popups.clone(),!r.queue.is_empty())};
+  let mut expired=vec![];
+  for (label,p) in popups {
+   let age=p.opened.elapsed().as_secs();
+   let retire=if !p.ready{age>=12}else if queued{age>=12}else{p.payload["motion"]!="roll"&&age>=18};
+   let Some(w)=app.get_webview_window(&label)else{expired.push(label);continue;};
+   if retire{expired.push(label);continue;}
+   // Restore accidental OS hiding without acknowledging or restarting a timer.
+   if p.ready&&!w.is_visible().unwrap_or(false){native::show_inactive(&w);}
+   if p.payload["motion"]=="roll"{
+    let cursor=native::cursor();let pos=w.outer_position().unwrap_or_default();let scale=if p.viewport_width>0.0{w.inner_size().unwrap_or_default().width as f64/p.viewport_width}else{w.scale_factor().unwrap_or(1.0)};
+    if scale<=0.0{continue;}
+    let x=(cursor.0-pos.x)as f64/scale;let y=(cursor.1-pos.y)as f64/scale;
+    let hit=p.regions.iter().any(|v|{let rx=v["x"].as_f64().unwrap_or(-9999.);let ry=v["y"].as_f64().unwrap_or(-9999.);x>=rx&&y>=ry&&x<=rx+v["width"].as_f64().unwrap_or(0.)&&y<=ry+v["height"].as_f64().unwrap_or(0.)});
+    native::set_cursor_passthrough(&w,!hit);
+   }
+  }
+  // Yielding to a newer reminder is not an acknowledgement: health reminders
+  // remain pending and can be reopened from settings until explicitly handled.
+  for l in expired{close_popup(&app,&l,false);}
   if second.elapsed()>=Duration::from_secs(1){second=Instant::now();let due=b.store.lock().unwrap().tick(Local::now());match due{Ok(due)=>for p in due{enqueue(&app,p,false)},Err(e)=>eprintln!("Timer: {e}")}let _=app.emit("system:clock",clock());let status=b.store.lock().unwrap().wellness_status(Local::now());let _=app.emit("wellness:state",status);prune(&app);}
   if let Err(e)=present_next(&app){eprintln!("Reminder: {e}");}
   if raise_at.elapsed()>=Duration::from_millis(700){raise_at=Instant::now();let pin=settings(&app)["alwaysOnTop"]==true;let mut windows:Vec<_>=app.webview_windows().into_iter().collect();windows.sort_by_key(|(label,_)|if label=="main"{0}else if label=="mini"{1}else{2});for (label,w) in windows{if w.is_visible().unwrap_or(false)&&(label!="main"||pin){native::raise(&w);}}}
