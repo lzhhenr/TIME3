@@ -3675,7 +3675,7 @@ dependencies = [
 
 [[package]]
 name = "time3-tauri"
-version = "1.6.0-beta.2"
+version = "1.6.0-beta.3"
 dependencies = [
  "chrono",
  "serde",
