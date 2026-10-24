@@ -12,7 +12,7 @@ public class NativeStack {
  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
- public static object[] Read(int target,int rival){var result=new List<object>();int index=0;EnumWindows((h,p)=>{uint pid;GetWindowThreadProcessId(h,out pid);int z=index++;if((pid==target||pid==rival)&&IsWindowVisible(h)){Rect r;GetWindowRect(h,out r);result.Add(new {handle=h.ToInt64().ToString(),pid,z,x=r.left,y=r.top,width=r.right-r.left,height=r.bottom-r.top,focused=h==GetForegroundWindow()});}return true;},IntPtr.Zero);return result.ToArray();}
+ public static object[] Read(int target,int rival){var result=new List<object>();int index=0;EnumWindows((h,p)=>{uint pid;GetWindowThreadProcessId(h,out pid);int z=index++;if((pid==target||pid==rival)&&IsWindowVisible(h)){Rect r;GetWindowRect(h,out r);result.Add(new {handle=h.ToInt64().ToString(),pid,z,x=r.left,y=r.top,width=r.right-r.left,height=r.bottom-r.top,focused=h==GetForegroundWindow(),foreground=GetForegroundWindow().ToInt64().ToString()});}return true;},IntPtr.Zero);return result.ToArray();}
 }
 '@
 [NativeStack]::SetProcessDPIAware() | Out-Null
