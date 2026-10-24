@@ -12,14 +12,14 @@ struct Popup { payload: Value, opened: Instant, regions: Vec<Value>, ready: bool
 #[derive(Default)]
 struct Runtime { popups: HashMap<String,Popup>, queue: VecDeque<(Value,bool)>, mini: native::MiniController }
 struct Backend { store: Mutex<store::Store>, runtime: Mutex<Runtime>, data: PathBuf, mini_visible: AtomicBool }
-struct TrayControls { mini: tauri::menu::CheckMenuItem<tauri::Wry> }
+struct TrayControls { open: tauri::menu::MenuItem<tauri::Wry>, mini: tauri::menu::CheckMenuItem<tauri::Wry>, quit: tauri::menu::MenuItem<tauri::Wry> }
 static SERIAL: AtomicU64 = AtomicU64::new(1);
 fn backend(app:&AppHandle)->tauri::State<'_,Backend>{app.state::<Backend>()}
 fn settings(app:&AppHandle)->Value{backend(app).store.lock().unwrap().settings()}
 fn clock()->Value { let n=Local::now();json!({"epoch":n.timestamp_millis(),"date":n.format("%Y-%m-%d").to_string(),"time":n.format("%H:%M").to_string(),"offset":-n.offset().local_minus_utc()/60}) }
 fn emit_state(app:&AppHandle){ let b=backend(app);let s=b.store.lock().unwrap();let _=app.emit("calendar:state-changed",s.get());let _=app.emit("wellness:state",s.wellness_status(Local::now())); }
 fn base<'a>(app:&'a AppHandle,label:&str,url:&str)->WebviewWindowBuilder<'a,tauri::Wry,AppHandle>{
- WebviewWindowBuilder::new(app,label,WebviewUrl::App(url.into())).title("TIME³ · WebView2 试用版").decorations(false).transparent(true).shadow(false).visible(false).focused(false).maximizable(false).disable_drag_drop_handler().data_directory(backend(app).data.join("WebView2")).additional_browser_args("--autoplay-policy=no-user-gesture-required").on_navigation(|url|url.host_str()==Some("tauri.localhost")||url.scheme()=="tauri").on_page_load(|w,p|{if p.event()==tauri::webview::PageLoadEvent::Finished{if w.label()=="main"{let _=w.show();}else if w.label()!="mini"||backend(w.app_handle()).mini_visible.load(Ordering::SeqCst){native::show_inactive(&w);}}})
+ WebviewWindowBuilder::new(app,label,WebviewUrl::App(url.into())).title("TIME³").decorations(false).transparent(true).shadow(false).visible(false).focused(false).maximizable(false).disable_drag_drop_handler().data_directory(backend(app).data.join("WebView2")).additional_browser_args("--autoplay-policy=no-user-gesture-required").on_navigation(|url|url.host_str()==Some("tauri.localhost")||url.scheme()=="tauri").on_page_load(|w,p|{if p.event()==tauri::webview::PageLoadEvent::Finished{if w.label()=="main"{let _=w.show();}else if w.label()!="mini"||backend(w.app_handle()).mini_visible.load(Ordering::SeqCst){native::show_inactive(&w);}}})
 }
 fn place(w:&WebviewWindow,position:&str){
  let a=native::area(Some(w));let z=w.outer_size().unwrap_or(PhysicalSize::new(1180,820));let m=(16.0*a.scale) as i32;
@@ -48,7 +48,7 @@ fn show_mini(app:&AppHandle)->Result<(),String>{
 fn hide_main(app:&AppHandle){if let Some(w)=app.get_webview_window("main"){let _=w.hide();}if settings(app)["miniMode"]==true{let _=show_mini(app);}}
 fn sync_settings(app:&AppHandle,old:&Value){
  let s=settings(app);if let Some(w)=app.get_webview_window("main"){let _=w.set_always_on_top(s["alwaysOnTop"]==true);if old["windowPosition"]!=s["windowPosition"]{place(&w,s["windowPosition"].as_str().unwrap_or("center"));}}
- if let Some(tray)=app.try_state::<TrayControls>(){let _=tray.mini.set_checked(s["miniMode"]==true);}
+ if let Some(tray)=app.try_state::<TrayControls>(){let en=s["language"]=="en";let _=tray.open.set_text(if en{"Open TIME³"}else{"打开 TIME³"});let _=tray.mini.set_text(if en{"Floating cube"}else{"悬浮方块"});let _=tray.quit.set_text(if en{"Quit (stop reminders)"}else{"退出（停止提醒）"});let _=tray.mini.set_checked(s["miniMode"]==true);}
  if s["miniMode"]!=true {hide_mini(app);}
  prune(app);emit_state(app);
 }
@@ -179,8 +179,8 @@ fn main(){
   let data=portable::prepare()?;
   let store=store::Store::load(data.clone()).map_err(std::io::Error::other)?;app.manage(Backend{store:Mutex::new(store),runtime:Mutex::new(Runtime::default()),data,mini_visible:AtomicBool::new(false)});let h=app.handle();let a=native::area(None);
   let w=base(h,"main","index.html").inner_size((a.width as f64/a.scale-24.0).min(1180.0),(a.height as f64/a.scale-24.0).min(820.0)).min_inner_size(720.0,600.0).always_on_top(settings(h)["alwaysOnTop"]==true).build()?;place(&w,settings(h)["windowPosition"].as_str().unwrap_or("center"));
-  let open=tauri::menu::MenuItem::with_id(app,"open","打开 TIME³",true,None::<&str>)?;let mini=tauri::menu::CheckMenuItem::with_id(app,"mini","悬浮方块",true,settings(h)["miniMode"]==true,None::<&str>)?;let quit=tauri::menu::MenuItem::with_id(app,"quit","退出（停止提醒）",true,None::<&str>)?;let menu=tauri::menu::Menu::with_items(app,&[&open,&mini,&quit])?;app.manage(TrayControls{mini});
-  tauri::tray::TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).tooltip("TIME³ · WebView2 试用版").menu(&menu).show_menu_on_left_click(false).on_menu_event(|app,e|{let app=app.clone();let id=e.id.as_ref().to_string();std::thread::spawn(move||tray_action(app,id));}).on_tray_icon_event(|tray,event|{if matches!(event,tauri::tray::TrayIconEvent::Click{button:tauri::tray::MouseButton::Left,button_state:tauri::tray::MouseButtonState::Up,..}){let app=tray.app_handle().clone();std::thread::spawn(move||show_main(&app,Value::Null));}}).build(app)?;
+  let en=settings(h)["language"]=="en";let open=tauri::menu::MenuItem::with_id(app,"open",if en{"Open TIME³"}else{"打开 TIME³"},true,None::<&str>)?;let mini=tauri::menu::CheckMenuItem::with_id(app,"mini",if en{"Floating cube"}else{"悬浮方块"},true,settings(h)["miniMode"]==true,None::<&str>)?;let quit=tauri::menu::MenuItem::with_id(app,"quit",if en{"Quit (stop reminders)"}else{"退出（停止提醒）"},true,None::<&str>)?;let menu=tauri::menu::Menu::with_items(app,&[&open,&mini,&quit])?;app.manage(TrayControls{open,mini,quit});
+  tauri::tray::TrayIconBuilder::new().icon(app.default_window_icon().unwrap().clone()).tooltip("TIME³").menu(&menu).show_menu_on_left_click(false).on_menu_event(|app,e|{let app=app.clone();let id=e.id.as_ref().to_string();std::thread::spawn(move||tray_action(app,id));}).on_tray_icon_event(|tray,event|{if matches!(event,tauri::tray::TrayIconEvent::Click{button:tauri::tray::MouseButton::Left,button_state:tauri::tray::MouseButtonState::Up,..}){let app=tray.app_handle().clone();std::thread::spawn(move||show_main(&app,Value::Null));}}).build(app)?;
   let handle=app.handle().clone();std::thread::spawn(move||poll(handle));Ok(())
  }).on_window_event(|w,event|{if w.label()=="main"{if let tauri::WindowEvent::CloseRequested{api,..}=event{api.prevent_close();let app=w.app_handle().clone();std::thread::spawn(move||hide_main(&app));}}}).build(tauri::generate_context!()).expect("Unable to start TIME3").run(|_,event|{if let tauri::RunEvent::ExitRequested{code:None,api,..}=event{api.prevent_exit();}});
 }

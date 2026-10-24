@@ -10,3 +10,5 @@ github-upload/
 tauri-dist/
 src-tauri/target/
 
+
+/data/

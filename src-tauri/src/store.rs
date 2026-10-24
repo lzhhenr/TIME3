@@ -12,7 +12,7 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 pub fn default_settings() -> Value {
     json!({"motion":"roll","alwaysOnTop":false,"miniMode":false,"city":"厦门",
-        "palette":"butter","blockShape":"classic","language":"zh","useLocation":false,
+        "palette":"butter","blockShape":"classic","language":"en","useLocation":false,
         "bgEnabled":true,"bgColor":"#f0e9e2","bgOpacity":0.92,"textMode":"dark",
         "soundEnabled":true,"windowPosition":"center","sedentaryEnabled":false,
         "sedentaryMinutes":30,"eyeEnabled":false,"eyeMinutes":20,"codexEnabled":false,"codexMinutes":300})

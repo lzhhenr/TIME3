@@ -1,7 +1,7 @@
-# TIME³ 1.6.0-beta.6 / Tauri + WebView2
+# TIME³ 1.6.0
 
-修正托盘“悬浮方块”只能开启、无法取消的问题：改成勾选开关，开启显示小方块，再次点击关闭并保存。主界面收成小方块时同步托盘勾选状态。
+New users start in English. Saved English/Chinese choices are preserved. Native tray labels follow the selected language, including live changes in Settings.
 
-补充悬浮窗口的显示意图状态；取消或展开主界面后，延迟完成的窗口加载不会重新弹出小方块，隐藏状态也不再执行贴边唤出检测。
+This release includes portable data storage beside the EXE, the floating-cube cancellation fix, reminder visibility/queue changes, and the recent input/status layout updates.
 
-记录继续保存在 EXE 同目录 data 文件夹。按用户要求只进行修改和编译打包，未进行界面实测。
+GitHub Actions performs compilation and existing automated checks. Per the owner's request, no interactive application testing was performed for this update. The owner will verify runtime behavior.

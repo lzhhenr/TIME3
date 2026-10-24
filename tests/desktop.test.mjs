@@ -39,7 +39,7 @@ test('old saved settings migrate without losing reminders or enabling location',
   const state = createStore(filename).get();
   assert.deepEqual(state.reminders, base().reminders);
   assert.equal(state.settings.useLocation, false);
-  assert.equal(state.settings.language, 'zh');
+  assert.equal(state.settings.language, 'en');
   assert.equal(state.settings.palette, 'butter');
   assert.equal(state.settings.bgEnabled, true);
   assert.equal(state.settings.bgOpacity, .92);

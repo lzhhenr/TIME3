@@ -24,7 +24,7 @@ const desktop=window.desktop;
 const mode=new URLSearchParams(location.search).get('mode')||'main';
 const today=()=>dateKey(new Date());
 let selected=today(),viewYear=new Date().getFullYear(),viewMonth=new Date().getMonth();
-let state={reminders:[],settings:{city:'厦门',motion:'roll',alwaysOnTop:false,miniMode:false,palette:'butter',blockShape:'classic',language:'zh',useLocation:false,bgEnabled:true,bgColor:'#f0e9e2',bgOpacity:0.92,textMode:'dark',soundEnabled:true,windowPosition:'center',sedentaryEnabled:false,sedentaryMinutes:30,eyeEnabled:false,eyeMinutes:20,codexEnabled:false,codexMinutes:300}};
+let state={reminders:[],settings:{city:'厦门',motion:'roll',alwaysOnTop:false,miniMode:false,palette:'butter',blockShape:'classic',language:'en',useLocation:false,bgEnabled:true,bgColor:'#f0e9e2',bgOpacity:0.92,textMode:'dark',soundEnabled:true,windowPosition:'center',sedentaryEnabled:false,sedentaryMinutes:30,eyeEnabled:false,eyeMinutes:20,codexEnabled:false,codexMinutes:300}};
 const sound=createSoundEngine(true);let wellnessStatus={};
 let scene=null,editing=null,weather=null,weatherError='',weatherLoading=false,weatherRequest=0,saveQueue=Promise.resolve(),statusTimer;
 const weekdays=['星期日','星期一','星期二','星期三','星期四','星期五','星期六'];

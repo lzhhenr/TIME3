@@ -1,8 +1,8 @@
-name: Build Tauri trial
+name: Build Tauri Windows portable
 on:
   workflow_dispatch:
   push:
-    branches: [tauri-webview2]
+    branches: [main, tauri-webview2]
 permissions:
   contents: read
 jobs:

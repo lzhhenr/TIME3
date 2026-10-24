@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const DAY = 24 * 60 * 60 * 1000;
-const DEFAULT_SETTINGS = Object.freeze({ motion: 'roll', alwaysOnTop: false, miniMode: false, city: '厦门', palette: 'butter', blockShape: 'classic', language: 'zh', useLocation: false, bgEnabled: true, bgColor: '#f0e9e2', bgOpacity: 0.92, textMode: 'dark', soundEnabled: true, windowPosition: 'center', sedentaryEnabled: false, sedentaryMinutes: 30, eyeEnabled: false, eyeMinutes: 20, codexEnabled:false, codexMinutes:300 });
+const DEFAULT_SETTINGS = Object.freeze({ motion: 'roll', alwaysOnTop: false, miniMode: false, city: '厦门', palette: 'butter', blockShape: 'classic', language: 'en', useLocation: false, bgEnabled: true, bgColor: '#f0e9e2', bgOpacity: 0.92, textMode: 'dark', soundEnabled: true, windowPosition: 'center', sedentaryEnabled: false, sedentaryMinutes: 30, eyeEnabled: false, eyeMinutes: 20, codexEnabled:false, codexMinutes:300 });
 const LEGACY_PALETTES = Object.freeze({ macaron: 'butter', garden: 'rose', dusk: 'lavender' });
 const isRecord = value => value && typeof value === 'object' && !Array.isArray(value);
 function dateIsValid(value) {
